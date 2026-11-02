@@ -6,10 +6,10 @@
 S="$(cd "$(dirname "$0")" && pwd)"
 ROOT="$(cd "$S/../.." && pwd)"
 rm -rf "$S/data" "$S/config" "$S/cache" "$S/state" "$S/bus" "$S/shell.log"
-mkdir -p "$S/data/gnome-shell/extensions/search-beam@kingsleycj" "$S/data/gnome-shell/extensions/unsafe-helper@test" "$S/shots"
+mkdir -p "$S/data/gnome-shell/extensions/search-beam@kingsleycj.github.io" "$S/data/gnome-shell/extensions/unsafe-helper@test" "$S/shots"
 cp "$S/helper/"* "$S/data/gnome-shell/extensions/unsafe-helper@test/"
-unzip -q -o "$ROOT/build/search-beam@kingsleycj.shell-extension.zip" -d "$S/data/gnome-shell/extensions/search-beam@kingsleycj"
-glib-compile-schemas "$S/data/gnome-shell/extensions/search-beam@kingsleycj/schemas"
+unzip -q -o "$ROOT/build/search-beam@kingsleycj.github.io.shell-extension.zip" -d "$S/data/gnome-shell/extensions/search-beam@kingsleycj.github.io"
+glib-compile-schemas "$S/data/gnome-shell/extensions/search-beam@kingsleycj.github.io/schemas"
 export XDG_CONFIG_HOME=$S/config XDG_DATA_HOME=$S/data XDG_CACHE_HOME=$S/cache XDG_STATE_HOME=$S/state
 unset DISPLAY WAYLAND_DISPLAY
 exec dbus-run-session -- "$S/inner.sh" "$S"

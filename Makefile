@@ -1,4 +1,4 @@
-UUID := search-beam@kingsleycj
+UUID := search-beam@kingsleycj.github.io
 ZIP  := build/$(UUID).shell-extension.zip
 
 .PHONY: pack install clean

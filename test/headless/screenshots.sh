@@ -5,7 +5,7 @@ S="$(cd "$(dirname "$0")" && pwd)"
 ROOT="$(cd "$S/../.." && pwd)"
 ev() { "$S/ev.sh" "$1" >/dev/null; }
 val() { "$S/ev.sh" "$1" | python3 -c "import sys,ast,json; r=sys.stdin.read(); print(json.loads(ast.literal_eval(r[r.index(chr(39)):r.rindex(chr(39))+1])))"; }
-setting() { DBUS_SESSION_BUS_ADDRESS="$(cat $S/bus)" XDG_CONFIG_HOME=$S/config gsettings --schemadir "$S/data/gnome-shell/extensions/search-beam@kingsleycj/schemas" set org.gnome.shell.extensions.search-beam "$@"; }
+setting() { DBUS_SESSION_BUS_ADDRESS="$(cat $S/bus)" XDG_CONFIG_HOME=$S/config gsettings --schemadir "$S/data/gnome-shell/extensions/search-beam@kingsleycj.github.io/schemas" set org.gnome.shell.extensions.search-beam "$@"; }
 crop() { # name x y w h
   python3 - "$S/shots/$1.png" "$ROOT/docs/$1.png" "$2" "$3" "$4" "$5" <<'PY'
 import sys
@@ -34,9 +34,11 @@ ev 'sbTest.type("sett")'; sleep 2
 ev 'sbTest.chord("Escape")'; sleep 0.5
 setting blur-background false
 
-DBUS_SESSION_BUS_ADDRESS="$(cat $S/bus)" WAYLAND_DISPLAY=search-beam-test XDG_CONFIG_HOME=$S/config XDG_DATA_HOME=$S/data gnome-extensions prefs search-beam@kingsleycj; sleep 4
+DBUS_SESSION_BUS_ADDRESS="$(cat $S/bus)" WAYLAND_DISPLAY=search-beam-test XDG_CONFIG_HOME=$S/config XDG_DATA_HOME=$S/data gnome-extensions prefs search-beam@kingsleycj.github.io; sleep 4
 read -r PX PY PW PH <<<"$(val 'const w = global.get_window_actors().map(a => a.meta_window).find(w => w.title === "Search Beam"); const r = w.get_frame_rect(); [r.x, r.y, r.width, r.height].join(" ")')"
 "$S/shot.sh" prefs-general >/dev/null; crop prefs-general $((PX-M)) $((PY-M)) $((PW+2*M)) $((PH+2*M))
 ev "sbTest.click($((PX+PW/2+64)), $((PY+23)))"; sleep 1
 "$S/shot.sh" prefs-appearance >/dev/null; crop prefs-appearance $((PX-M)) $((PY-M)) $((PW+2*M)) $((PH+2*M))
+setting animation-speed 100.0
+ev 'global.get_window_actors().map(a => a.meta_window).find(w => w.title === "Search Beam")?.delete(global.get_current_time())'
 ls -la "$ROOT/docs"

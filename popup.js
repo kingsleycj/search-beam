@@ -17,15 +17,11 @@ import * as Main from 'resource:///org/gnome/shell/ui/main.js';
 import * as Background from 'resource:///org/gnome/shell/ui/background.js';
 
 // Base size in logical pixels; scale-width/scale-height add a fraction of half
-// the monitor on top (same formula Search Light used, so old values carry over).
+// the monitor on top. At 100% display scaling this matches Search Light's
+// formula, so imported values give the same size.
 const BASE_WIDTH = 600;
 const BASE_HEIGHT = 400;
 const START_SCALE = 0.9;
-
-// A click on the panel icon while the popup is open first closes it (the
-// search controller's click-outside handling), then reaches the icon. Ignore
-// a re-open that lands this soon after a close.
-const REOPEN_GUARD_US = 250 * 1000;
 
 const STYLE_KEYS = [
     'background-color', 'text-color', 'border-color', 'border-thickness',
@@ -77,6 +73,27 @@ function cssColor([r, g, b, a]) {
     return `rgba(${c(r)}, ${c(g)}, ${c(b)}, ${Math.min(Math.max(a, 0), 1).toFixed(3)})`;
 }
 
+// Replace obj[name] with fn; returns a record for restoreOverrides().
+function override(obj, name, fn) {
+    const record = {
+        obj,
+        name,
+        original: obj[name],
+        hadOwn: Object.prototype.hasOwnProperty.call(obj, name),
+    };
+    obj[name] = fn;
+    return record;
+}
+
+function restoreOverrides(records) {
+    for (const {obj, name, original, hadOwn} of records.reverse()) {
+        if (hadOwn)
+            obj[name] = original;
+        else
+            delete obj[name];
+    }
+}
+
 export class SearchBeamPopup {
     constructor(settings, stylesheetPath) {
         this._settings = settings;
@@ -84,11 +101,13 @@ export class SearchBeamPopup {
 
         this._visible = false; // open, or opening
         this._acquired = false; // holding the Overview's entry and results
-        this._lastHideTime = 0;
         this._monitor = null;
         this._geometry = null;
         this._prevFocusWindow = null;
         this._unredirectDisabled = false;
+        this._toggleSources = new Set();
+        this._relayoutId = 0;
+        this._restoreFocusId = 0;
 
         this.actor = new St.Widget({
             name: 'searchBeam',
@@ -100,6 +119,7 @@ export class SearchBeamPopup {
 
         this._blurBox = new St.Widget({
             name: 'searchBeamBlur',
+            layout_manager: new Clutter.BinLayout(),
             x_expand: true,
             y_expand: true,
             clip_to_allocation: true,
@@ -117,11 +137,13 @@ export class SearchBeamPopup {
         this.actor.add_child(this._box);
 
         // Escape closes the popup from anywhere inside it. Capture phase, so it
-        // runs before the search entry's own Escape handling.
+        // runs before the search entry's own Escape handling, except while an
+        // input method is composing (Escape then cancels the composition).
         this.actor.connect('captured-event', (actor, event) => {
             if (event.type() === Clutter.EventType.KEY_PRESS &&
-                event.get_key_symbol() === Clutter.KEY_Escape) {
-                this.hide({restoreFocus: true});
+                event.get_key_symbol() === Clutter.KEY_Escape &&
+                !this._entry?.clutter_text.has_preedit()) {
+                this.hide();
                 return Clutter.EVENT_STOP;
             }
             return Clutter.EVENT_PROPAGATE;
@@ -138,30 +160,27 @@ export class SearchBeamPopup {
         this._settings.connectObject('changed', (s, key) =>
             this._onSettingChanged(key), this);
 
-        const themeContext = St.ThemeContext.get_for_stage(global.stage);
-        themeContext.connectObject('changed', () => {
-            // Loading a stylesheet also emits 'changed', so only react when
-            // the theme itself was replaced (that drops our stylesheet).
-            if (themeContext.get_theme() === this._theme)
-                return;
-            this._appliedCss = null;
-            this._updateStyle();
+        // The Overview is about to use its search box: give it back now, even
+        // if we're open or still fading out. (Theme reloads need no handling:
+        // Main.loadTheme() carries custom stylesheets over to the new theme.)
+        Main.overview.connectObject('showing', () => {
+            this.hide({animate: false, restoreFocus: false});
+            this._finishHide();
         }, this);
-
-        // If the Overview opens while we're still fading out, give its
-        // search back straight away.
-        Main.overview.connectObject('showing', () => this._finishHide(), this);
 
         this._updateStyle();
     }
 
     destroy() {
-        this.hide({animate: false});
+        this.hide({animate: false, restoreFocus: false});
         this._finishHide(); // in case a fade-out was still running
         this._destroyBlur();
+        if (this._restoreFocusId) {
+            GLib.source_remove(this._restoreFocusId);
+            this._restoreFocusId = 0;
+        }
 
         this._settings.disconnectObject(this);
-        St.ThemeContext.get_for_stage(global.stage).disconnectObject(this);
         Main.overview.disconnectObject(this);
 
         if (this._cssFile) {
@@ -181,13 +200,20 @@ export class SearchBeamPopup {
         this._settings = null;
     }
 
-    get visible() {
-        return this._visible;
+    // Actors (like the top-bar button) that toggle the popup themselves.
+    // Pressing them must not count as a click outside, or the press would
+    // close the popup and the release would open it again.
+    addToggleSource(actor) {
+        this._toggleSources.add(actor);
+    }
+
+    removeToggleSource(actor) {
+        this._toggleSources.delete(actor);
     }
 
     toggle() {
         if (this._visible)
-            this.hide({restoreFocus: true});
+            this.hide();
         else
             this.show();
     }
@@ -195,12 +221,14 @@ export class SearchBeamPopup {
     show() {
         if (this._visible || Main.overview.visible || Main.overview.isDummy)
             return;
-        if (GLib.get_monotonic_time() - this._lastHideTime < REOPEN_GUARD_US)
-            return;
 
         // Set before anything that can fire a pending hide's onComplete.
         this._visible = true;
         this.actor.remove_all_transitions();
+        if (this._restoreFocusId) {
+            GLib.source_remove(this._restoreFocusId);
+            this._restoreFocusId = 0;
+        }
 
         this._prevFocusWindow = global.display.focus_window;
         this._monitor = this._pickMonitor();
@@ -246,23 +274,31 @@ export class SearchBeamPopup {
         });
     }
 
-    hide({restoreFocus = false, animate = true} = {}) {
+    // restoreFocus: give keyboard focus back to the window that had it before
+    // the popup opened, unless something else (a clicked window, a menu, a
+    // switcher) has taken focus by then. Activating a result passes false:
+    // the app being launched should get focus, and focusing the old window
+    // now would make GNOME's focus-stealing prevention hold the new one back.
+    hide({restoreFocus = true, animate = true} = {}) {
         if (!this._visible)
             return;
 
         this._visible = false;
-        this._lastHideTime = GLib.get_monotonic_time();
         this._disconnectWhileOpen();
         if (this._relayoutId) {
             GLib.source_remove(this._relayoutId);
             this._relayoutId = 0;
         }
 
+        // Stop typing into a popup that's fading out.
+        const focus = global.stage.get_key_focus();
+        if (focus && this.actor.contains(focus))
+            global.stage.set_key_focus(null);
+
         const prevWindow = this._prevFocusWindow;
         this._prevFocusWindow = null;
-        if (restoreFocus && prevWindow && !global.display.focus_window &&
-            prevWindow.get_compositor_private())
-            prevWindow.focus(global.get_current_time());
+        if (restoreFocus && prevWindow)
+            this._scheduleFocusRestore(prevWindow);
 
         // Never leave the Overview without its search box.
         if (!animate || !this._animate() || Main.overview.visible) {
@@ -280,6 +316,22 @@ export class SearchBeamPopup {
                 if (!this._visible)
                     this._finishHide();
             },
+        });
+    }
+
+    // Deferred so that whatever caused the close (a click on a window or the
+    // top bar) has had its effect first.
+    _scheduleFocusRestore(window) {
+        if (this._restoreFocusId)
+            GLib.source_remove(this._restoreFocusId);
+        this._restoreFocusId = GLib.idle_add(GLib.PRIORITY_DEFAULT_IDLE, () => {
+            this._restoreFocusId = 0;
+            const keyFocus = global.stage.get_key_focus();
+            const shellHasFocus = keyFocus && keyFocus !== global.stage;
+            if (!this._visible && !global.display.focus_window && !shellHasFocus &&
+                window.get_compositor_private())
+                window.focus(global.get_current_time());
+            return GLib.SOURCE_REMOVE;
         });
     }
 
@@ -328,36 +380,54 @@ export class SearchBeamPopup {
         controller.connectObject('notify::search-active',
             () => this._onSearchActiveChanged(), this);
 
-        // Activating a result calls Main.overview.toggle() (which would open
-        // the Overview) or Main.overview.hide() (app results). While we hold
-        // the search, both mean "the user picked something: close the popup".
-        this._overviewOverrides = ['toggle', 'hide'].map(name => {
-            const overview = Main.overview;
-            const original = overview[name];
-            const hadOwn = Object.prototype.hasOwnProperty.call(overview, name);
-            overview[name] = (...args) => {
-                if (this._visible)
-                    this.hide();
-                else
-                    original.apply(overview, args);
-            };
-            return {name, original, hadOwn};
-        });
+        const overview = Main.overview;
+        const closeOrCall = original => (...args) => {
+            if (this._visible)
+                this.hide({restoreFocus: !this._isResultActivation()});
+            else
+                original.apply(overview, args);
+        };
+        this._overrides = [
+            // Activating a result calls Main.overview.toggle() (which would
+            // open the Overview) or Main.overview.hide() (app results). While
+            // we hold the search, both mean "the user picked something".
+            override(overview, 'toggle', closeOrCall(overview.toggle)),
+            override(overview, 'hide', closeOrCall(overview.hide)),
+            // SearchController.reset() clears the text and also drops key
+            // focus, which is fine inside the Overview's grab but here would
+            // read as "focus left the popup". It runs on the clear icon, on a
+            // whitespace-only search, on clicks around an empty search box and
+            // when the controller is unmapped. Only clear the text.
+            override(controller, 'reset', () => {
+                entry.text = '';
+                entry.clutter_text.set_cursor_visible(true);
+                entry.clutter_text.set_selection(0, 0);
+            }),
+        ];
 
         this._acquired = true;
+    }
+
+    // Did the event being handled pick a result in the popup (Enter in the
+    // search box, a click on a result)? Super and the hot corner also call
+    // Main.overview.toggle(), but those should give focus back.
+    _isResultActivation() {
+        const event = Clutter.get_current_event();
+        if (!event)
+            return false;
+
+        const type = event.type();
+        if ((type === Clutter.EventType.KEY_PRESS || type === Clutter.EventType.KEY_RELEASE) &&
+            [Clutter.KEY_Super_L, Clutter.KEY_Super_R].includes(event.get_key_symbol()))
+            return false;
+
+        const target = global.stage.get_event_actor(event);
+        return !!target && this.actor.contains(target);
     }
 
     _release() {
         if (!this._acquired)
             return;
-
-        for (const {name, original, hadOwn} of this._overviewOverrides) {
-            if (hadOwn)
-                Main.overview[name] = original;
-            else
-                delete Main.overview[name];
-        }
-        this._overviewOverrides = null;
 
         const entry = this._entry;
         const controller = this._controller;
@@ -365,9 +435,14 @@ export class SearchBeamPopup {
         controller.disconnectObject(this);
         entry.remove_style_class_name('search-beam-entry');
 
-        // Removing the controller unmaps it, which clears the search text.
+        // Taking the controller out clears the search text (via our reset
+        // override, so key focus is left alone), so restore overrides after.
         this._box.remove_child(controller);
         this._box.remove_child(entry);
+        entry.text = '';
+
+        restoreOverrides(this._overrides);
+        this._overrides = null;
 
         if (this._entryParent instanceof St.Bin)
             this._entryParent.set_child(entry);
@@ -447,7 +522,10 @@ export class SearchBeamPopup {
             return Clutter.EVENT_PROPAGATE;
 
         const target = global.stage.get_event_actor(event);
-        if (target && (this.actor.contains(target) || this._isOurMenu(target)))
+        if (target && (this.actor.contains(target) ||
+                       this._isOurMenu(target) ||
+                       Main.layoutManager.keyboardBox.contains(target) ||
+                       [...this._toggleSources].some(s => s.contains(target))))
             return Clutter.EVENT_PROPAGATE;
 
         this.hide();
@@ -502,18 +580,24 @@ export class SearchBeamPopup {
             return;
 
         const monitor = this._monitor;
+        const work = Main.layoutManager.getWorkAreaForMonitor(monitor.index);
         const scale = St.ThemeContext.get_for_stage(global.stage).scale_factor;
         const sw = this._settings.get_double('scale-width');
         const sh = this._settings.get_double('scale-height');
 
-        const width = Math.min(monitor.width,
+        const width = Math.min(work.width,
             Math.round((BASE_WIDTH + (monitor.width / scale / 2) * sw) * scale));
-        const fullHeight = Math.min(monitor.height,
+        const fullHeight = Math.min(work.height,
             Math.round((BASE_HEIGHT + (monitor.height / scale / 2) * sh) * scale));
 
-        // Centre the full-size popup; the bare search box sits at its top.
-        const x = monitor.x + Math.round((monitor.width - width) / 2);
-        const y = monitor.y + Math.round((monitor.height - fullHeight) / 2);
+        // Centre the full-size popup on the monitor (the bare search box sits
+        // at its top), then nudge it inside the work area so it never covers
+        // the top bar or a dock.
+        const clamp = (v, lo, hi) => Math.max(lo, Math.min(v, hi));
+        const x = clamp(monitor.x + Math.round((monitor.width - width) / 2),
+            work.x, work.x + work.width - width);
+        const y = clamp(monitor.y + Math.round((monitor.height - fullHeight) / 2),
+            work.y, work.y + work.height - fullHeight);
 
         const height = this._controller.searchActive
             ? fullHeight
@@ -540,27 +624,39 @@ export class SearchBeamPopup {
 
     _syncBlur() {
         const enabled = this._settings.get_boolean('blur-background');
-        const monitorIndex = this._monitor?.index ?? Main.layoutManager.primaryIndex;
+        const m = this._monitor ?? Main.layoutManager.primaryMonitor;
+        // The wallpaper actor is placed for one monitor's position and size;
+        // rebuild if the monitor (or its geometry) changed.
+        const monitorKey = `${m.index}:${m.x},${m.y},${m.width}x${m.height}`;
 
-        if (!enabled || this._blurMonitorIndex !== monitorIndex)
+        if (!enabled || this._blurMonitorKey !== monitorKey)
             this._destroyBlur();
         if (!enabled)
             return;
 
         if (!this._bgManager) {
+            // _blurBox (rounded mask) > _blurClip (popup-sized, blurred) >
+            // _bgContainer (wallpaper at monitor coordinates). Blurring the
+            // clipped layer keeps the blur pass to the popup's size.
+            this._blurClip = new St.Widget({
+                x_expand: true,
+                y_expand: true,
+                clip_to_allocation: true,
+            });
+            this._blurBox.add_child(this._blurClip);
             this._bgContainer = new Clutter.Actor();
-            this._blurBox.add_child(this._bgContainer);
+            this._blurClip.add_child(this._bgContainer);
             this._bgManager = new Background.BackgroundManager({
                 container: this._bgContainer,
-                monitorIndex,
+                monitorIndex: m.index,
                 vignette: false,
                 controlPosition: true,
             });
             this._blurEffect = new Shell.BlurEffect({mode: Shell.BlurMode.ACTOR});
-            this._bgContainer.add_effect_with_name('blur', this._blurEffect);
+            this._blurClip.add_effect_with_name('blur', this._blurEffect);
             this._maskEffect = new RoundedMaskEffect();
             this._blurBox.add_effect_with_name('mask', this._maskEffect);
-            this._blurMonitorIndex = monitorIndex;
+            this._blurMonitorKey = monitorKey;
         }
 
         const scale = St.ThemeContext.get_for_stage(global.stage).scale_factor;
@@ -577,9 +673,11 @@ export class SearchBeamPopup {
         // The wallpaper actor sits at monitor coordinates inside the
         // container; shift the container so the visible slice lines up.
         this._bgContainer.set_position(-x, -y);
+        // St draws at most half the box's shorter side as corner radius.
         const scale = St.ThemeContext.get_for_stage(global.stage).scale_factor;
-        this._maskEffect.setGeometry(
-            this._settings.get_int('border-radius') * scale, width, height);
+        const radius = Math.min(this._settings.get_int('border-radius') * scale,
+            width / 2, height / 2);
+        this._maskEffect.setGeometry(radius, width, height);
     }
 
     _destroyBlur() {
@@ -587,12 +685,13 @@ export class SearchBeamPopup {
             return;
         this._blurBox.remove_effect_by_name('mask');
         this._bgManager.destroy();
-        this._bgContainer.destroy();
+        this._blurClip.destroy();
         this._bgManager = null;
         this._bgContainer = null;
+        this._blurClip = null;
         this._blurEffect = null;
         this._maskEffect = null;
-        this._blurMonitorIndex = undefined;
+        this._blurMonitorKey = undefined;
         this._blurBox.hide();
     }
 
@@ -620,9 +719,12 @@ export class SearchBeamPopup {
         const fontSize = this._settings.get_int('font-size');
         const entryFontSize = this._settings.get_int('entry-font-size');
 
-        // Automatic text colour: dark text on light backgrounds.
+        // Automatic text colour: dark text only on a light background that is
+        // opaque enough to decide what's behind the text. A mostly
+        // see-through background keeps the shell's usual white text.
         const autoText = text[3] <= 0;
-        const lightBg = 0.3 * bg[0] + 0.59 * bg[1] + 0.11 * bg[2] >= 0.5;
+        const lightBg = bg[3] >= 0.5 &&
+            0.3 * bg[0] + 0.59 * bg[1] + 0.11 * bg[2] >= 0.5;
         if (autoText && lightBg)
             this._box.add_style_class_name('light');
         else
@@ -654,7 +756,6 @@ export class SearchBeamPopup {
             return;
 
         const theme = St.ThemeContext.get_for_stage(global.stage).get_theme();
-        this._theme = theme;
         if (this._cssFile)
             theme.unload_stylesheet(this._cssFile);
         else

@@ -30,8 +30,15 @@ export default class Helper extends Extension {
                 ptr.notify_button(t(), Clutter.BUTTON_PRIMARY, Clutter.ButtonState.PRESSED);
                 ptr.notify_button(t(), Clutter.BUTTON_PRIMARY, Clutter.ButtonState.RELEASED);
             },
+            press(x, y) {
+                ptr.notify_absolute_motion(t(), x, y);
+                ptr.notify_button(t(), Clutter.BUTTON_PRIMARY, Clutter.ButtonState.PRESSED);
+            },
+            release() {
+                ptr.notify_button(t(), Clutter.BUTTON_PRIMARY, Clutter.ButtonState.RELEASED);
+            },
             ext() {
-                const e = Main.extensionManager.lookup('search-beam@kingsleycj');
+                const e = Main.extensionManager.lookup('search-beam@kingsleycj.github.io');
                 return {state: e?.state, error: `${e?.error ?? ''}`};
             },
             popup() {
@@ -46,6 +53,11 @@ export default class Helper extends Extension {
                     text: entry.text,
                     searchActive: Main.overview.searchController.searchActive,
                     keyFocus: `${global.stage.key_focus}`,
+                    focusInPopup: !!a && !!global.stage.key_focus && a.contains(global.stage.key_focus),
+                    insideWorkArea: !!a && (() => {
+                        const w = Main.layoutManager.getWorkAreaForMonitor(Main.layoutManager.primaryIndex);
+                        return a.y >= w.y && a.y + a.height <= w.y + w.height;
+                    })(),
                     focusWindow: global.display.focus_window?.title ?? null,
                     overview: Main.overview.visible,
                     toggleOwn: Object.prototype.hasOwnProperty.call(Main.overview, 'toggle') || Object.prototype.hasOwnProperty.call(Main.overview, 'hide'),

@@ -45,9 +45,11 @@ from scratch for the current GNOME Shell APIs.
 
 ## Install
 
-1. Clone this repository and, from its folder, run:
+1. Download and install it:
 
    ```sh
+   git clone https://github.com/kingsleycj/search-beam.git
+   cd search-beam
    make install
    ```
 
@@ -56,7 +58,7 @@ from scratch for the current GNOME Shell APIs.
 3. Turn it on:
 
    ```sh
-   gnome-extensions enable search-beam@kingsleycj
+   gnome-extensions enable search-beam@kingsleycj.github.io
    ```
 
 The default shortcut is **Ctrl+Super+Space**. When you update later, run
@@ -80,7 +82,7 @@ The default shortcut is **Ctrl+Super+Space**. When you update later, run
 Open them from the Extensions app (the gear next to Search Beam), or run:
 
 ```sh
-gnome-extensions prefs search-beam@kingsleycj
+gnome-extensions prefs search-beam@kingsleycj.github.io
 ```
 
 | | |
@@ -89,7 +91,7 @@ gnome-extensions prefs search-beam@kingsleycj
 
 | Setting | What it does |
 | --- | --- |
-| Open search / Second shortcut | Shortcuts that toggle the popup. Click a row, then press the new combination (Backspace clears it). |
+| Open search / Second shortcut | Shortcuts that toggle the popup. Click a row, then press the new combination: Ctrl, Alt or Super with a key, or an F-key (Backspace clears it). The first time, GNOME asks whether to let Extensions *inhibit shortcuts*. Choose **Allow** so the dialog can record combinations GNOME normally keeps for itself. |
 | Monitor | Which monitor to open on |
 | Follow the mouse | Open on the monitor under the pointer instead |
 | Top bar icon | Show a search button in the top bar |
@@ -103,9 +105,9 @@ gnome-extensions prefs search-beam@kingsleycj
 
 ### Picking a shortcut that GNOME already uses
 
-If you choose a combination GNOME already uses, GNOME takes it first and Search
-Beam never sees it. **Alt+Space** is the usual one: GNOME uses it to open the
-window menu. To use it for Search Beam, free it first:
+If you choose a combination GNOME already uses, the two clash and only one of
+them responds, and GNOME doesn't warn you. **Alt+Space** is the usual one: GNOME
+uses it to open the window menu. To use it for Search Beam, free it first:
 
 ```sh
 gsettings set org.gnome.desktop.wm.keybindings activate-window-menu "[]"
@@ -128,17 +130,20 @@ clashes.
    tools/import-search-light.py             # copy it
    ```
 
-The script copies your shortcuts, colours, size, monitor, blur, top-bar icon and
+The script copies your shortcuts, colours, size, blur, top-bar icon and
 animation settings. Search Light's corner-radius and font-size steps become real
-pixel and point values. Search Light's "window effect" filters and its
+pixel and point values. Every value is checked against Search Beam's limits;
+anything out of range is listed and skipped rather than silently dropped. If
+you'd picked a specific non-primary monitor, choose it again in the settings,
+because the two extensions number monitors differently. Search Light's "window effect" filters and its
 unit/currency converter switches have no equivalent here. (The converters never
 did anything in Search Light either.)
 
 ## Uninstall
 
 ```sh
-gnome-extensions disable search-beam@kingsleycj
-gnome-extensions uninstall search-beam@kingsleycj
+gnome-extensions disable search-beam@kingsleycj.github.io
+gnome-extensions uninstall search-beam@kingsleycj.github.io
 dconf reset -f /org/gnome/shell/extensions/search-beam/   # optional: forget settings
 ```
 
@@ -148,11 +153,11 @@ dconf reset -f /org/gnome/shell/extensions/search-beam/   # optional: forget set
 Check that GNOME has loaded it:
 
 ```sh
-gnome-extensions info search-beam@kingsleycj
+gnome-extensions info search-beam@kingsleycj.github.io
 ```
 
 - **"does not exist":** you haven't logged out and back in since installing.
-- **State isn't ACTIVE:** enable it with `gnome-extensions enable search-beam@kingsleycj`.
+- **State isn't ACTIVE:** enable it with `gnome-extensions enable search-beam@kingsleycj.github.io`.
 - **ERROR:** see the logs below.
 - **ACTIVE but the shortcut does nothing:** another shortcut is probably using
   the same keys (see
@@ -194,17 +199,17 @@ when the popup closes or the extension is disabled.
 | `test/headless/` | Automated tests in a throwaway GNOME Shell |
 
 ```sh
-make pack      # build build/search-beam@kingsleycj.shell-extension.zip
+make pack      # build build/search-beam@kingsleycj.github.io.shell-extension.zip
 make install   # install it for your user (then log out and back in)
 ```
 
 ### Testing without logging out
 
 `test/headless/` starts a separate, headless GNOME Shell with its own settings,
-loads Search Beam in it, and runs 34 checks: opening and closing, focus
-returning to the previous window, launching results, Activities search still
-working, blur, disabling while open, the settings window and the top-bar
-button. It never touches your running session. See
+loads Search Beam in it, and runs 49 checks: opening and closing, clearing
+the search, focus returning to the previous window, launching results,
+Activities search still working, staying clear of the top bar, blur, disabling
+while open, the settings window and the top-bar button. It never touches your running session. See
 [test/headless/README.md](test/headless/README.md), and read its note about
 when it's safe to stop the test shell.
 

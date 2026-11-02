@@ -22,6 +22,7 @@ const PanelButton = GObject.registerClass(
 class SearchBeamPanelButton extends PanelMenu.Button {
     _init(onActivate) {
         super._init(0.0, 'Search Beam', true);
+        this._onActivate = onActivate;
 
         this.add_child(new St.Icon({
             icon_name: 'edit-find-symbolic',
@@ -29,8 +30,20 @@ class SearchBeamPanelButton extends PanelMenu.Button {
         }));
 
         const click = new Clutter.ClickGesture();
-        click.connect('recognize', () => onActivate());
+        click.connect('recognize', () => this._onActivate());
         this.add_action(click);
+    }
+
+    // Keyboard users reach the button with Ctrl+Alt+Tab; let Enter and Space
+    // press it. (Arrow keys are handled by PanelMenu.Button's own handler.)
+    vfunc_key_press_event(event) {
+        const symbol = event.get_key_symbol();
+        if (symbol === Clutter.KEY_Return || symbol === Clutter.KEY_KP_Enter ||
+            symbol === Clutter.KEY_space) {
+            this._onActivate();
+            return Clutter.EVENT_STOP;
+        }
+        return super.vfunc_key_press_event(event);
     }
 });
 
@@ -59,9 +72,7 @@ export default class SearchBeamExtension extends Extension {
             Main.wm.removeKeybinding(key);
 
         this._settings.disconnectObject(this);
-
-        this._panelButton?.destroy();
-        this._panelButton = null;
+        this._destroyPanelButton();
 
         this._popup.destroy();
         this._popup = null;
@@ -74,10 +85,18 @@ export default class SearchBeamExtension extends Extension {
 
         if (wanted && !this._panelButton) {
             this._panelButton = new PanelButton(() => this._popup.toggle());
+            this._popup.addToggleSource(this._panelButton);
             Main.panel.addToStatusArea(this.uuid, this._panelButton, 0, 'right');
-        } else if (!wanted && this._panelButton) {
-            this._panelButton.destroy();
-            this._panelButton = null;
+        } else if (!wanted) {
+            this._destroyPanelButton();
         }
+    }
+
+    _destroyPanelButton() {
+        if (!this._panelButton)
+            return;
+        this._popup.removeToggleSource(this._panelButton);
+        this._panelButton.destroy();
+        this._panelButton = null;
     }
 }

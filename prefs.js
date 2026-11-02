@@ -26,6 +26,17 @@ export default class SearchBeamPreferences extends ExtensionPreferences {
         window._settings = settings; // keep alive with the window
         window.set_default_size(640, 720);
 
+        // settings.bind() bindings end with their widgets, but plain
+        // 'changed' handlers don't: drop them when the window closes, so they
+        // never touch disposed widgets if the Extensions app keeps running.
+        const handlerIds = [];
+        this._watch = (key, callback) =>
+            handlerIds.push(settings.connect(`changed::${key}`, callback));
+        window.connect('close-request', () => {
+            handlerIds.splice(0).forEach(id => settings.disconnect(id));
+            return false;
+        });
+
         window.add(this._generalPage(window, settings));
         window.add(this._appearancePage(settings));
     }
@@ -98,7 +109,7 @@ export default class SearchBeamPreferences extends ExtensionPreferences {
             clear.visible = label.accelerator !== '';
         };
         sync();
-        settings.connect(`changed::${key}`, sync);
+        this._watch(key, sync);
 
         row.add_suffix(label);
         row.add_suffix(clear);
@@ -109,9 +120,26 @@ export default class SearchBeamPreferences extends ExtensionPreferences {
     _captureShortcut(window, settings, key, title) {
         const dialog = new Adw.AlertDialog({
             heading: title,
-            body: 'Press the new shortcut.\nEsc cancels, Backspace removes it.',
+            body: 'Press the new shortcut: Ctrl, Alt or Super with a key, or an F-key.\nEsc cancels, Backspace removes it.',
         });
         dialog.add_response('cancel', 'Cancel');
+
+        // Let the dialog receive combinations GNOME Shell would otherwise
+        // handle itself (including Search Beam's current shortcut). GNOME may
+        // ask once for permission, as it does in Settings → Keyboard.
+        const surface = window.get_surface();
+        try {
+            surface?.inhibit_system_shortcuts(null);
+        } catch {
+            // not supported here; capture still works for free combinations
+        }
+        dialog.connect('closed', () => {
+            try {
+                surface?.restore_system_shortcuts();
+            } catch {
+                // nothing was inhibited
+            }
+        });
 
         const controller = new Gtk.EventControllerKey({
             propagation_phase: Gtk.PropagationPhase.CAPTURE,
@@ -128,8 +156,11 @@ export default class SearchBeamPreferences extends ExtensionPreferences {
                 dialog.close();
                 return Gdk.EVENT_STOP;
             }
-            // Wait for a real key, not a bare modifier.
-            if (!Gtk.accelerator_valid(keyval, mods) || !mods)
+            // Wait for a real key, not a bare modifier. Shift alone is not
+            // enough: Shift+A would steal every capital A system-wide.
+            const hasModifier = (mods & ~Gdk.ModifierType.SHIFT_MASK) !== 0;
+            const isFunctionKey = keyval >= Gdk.KEY_F1 && keyval <= Gdk.KEY_F35;
+            if (!Gtk.accelerator_valid(keyval, mods) || (!hasModifier && !isFunctionKey))
                 return Gdk.EVENT_STOP;
 
             const accel = Gtk.accelerator_name_with_keycode(null, keyval, keycode, mods);
@@ -189,7 +220,7 @@ export default class SearchBeamPreferences extends ExtensionPreferences {
             textRow.sensitive = !auto;
         };
         syncAuto();
-        settings.connect('changed::text-color', syncAuto);
+        this._watch('text-color', syncAuto);
         autoText.connect('notify::active', () => {
             const [r, g, b, a] = readColor(settings, 'text-color');
             if (autoText.active && a > 0)
@@ -209,7 +240,7 @@ export default class SearchBeamPreferences extends ExtensionPreferences {
             borderColor.sensitive = settings.get_int('border-thickness') > 0;
         };
         syncBorder();
-        settings.connect('changed::border-thickness', syncBorder);
+        this._watch('border-thickness', syncBorder);
         shape.add(borderColor);
         page.add(shape);
 
@@ -225,7 +256,7 @@ export default class SearchBeamPreferences extends ExtensionPreferences {
         });
         settings.bind('blur-background', blurRow, 'active', Gio.SettingsBindFlags.DEFAULT);
         blur.add(blurRow);
-        const strength = this._spinRow(settings, 'blur-sigma', 'Strength', 0, 100, 1);
+        const strength = this._spinRow(settings, 'blur-sigma', 'Strength', 0, 200, 1);
         settings.bind('blur-background', strength, 'sensitive', Gio.SettingsBindFlags.GET);
         blur.add(strength);
         const brightness = this._scaleRow(settings, 'blur-brightness', 'Brightness', 0, 1, 0.01);
@@ -277,7 +308,7 @@ export default class SearchBeamPreferences extends ExtensionPreferences {
             updating = false;
         };
         sync();
-        settings.connect(`changed::${key}`, sync);
+        this._watch(key, sync);
         button.connect('notify::rgba', () => {
             if (!updating)
                 settings.set_value(key, fromRgba(button.rgba));
