@@ -1,0 +1,103 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<schemalist gettext-domain="search-beam">
+  <schema id="org.gnome.shell.extensions.search-beam" path="/org/gnome/shell/extensions/search-beam/">
+
+    <!-- Shortcuts -->
+    <key name="shortcut-search" type="as">
+      <default><![CDATA[['<Control><Super>space']]]></default>
+      <summary>Shortcut that toggles the search popup</summary>
+    </key>
+    <key name="secondary-shortcut-search" type="as">
+      <default><![CDATA[[]]]></default>
+      <summary>Optional second shortcut that toggles the search popup</summary>
+    </key>
+
+    <!-- Placement -->
+    <key name="preferred-monitor" type="i">
+      <default>0</default>
+      <range min="0" max="16"/>
+      <summary>Monitor to open on (0 = primary, n = monitor n)</summary>
+    </key>
+    <key name="popup-at-cursor-monitor" type="b">
+      <default>false</default>
+      <summary>Open on the monitor under the mouse pointer</summary>
+    </key>
+
+    <!-- Size -->
+    <key name="scale-width" type="d">
+      <default>0.2</default>
+      <range min="0.0" max="1.0"/>
+      <summary>Extra width, as a fraction of half the monitor width</summary>
+    </key>
+    <key name="scale-height" type="d">
+      <default>0.2</default>
+      <range min="0.0" max="1.0"/>
+      <summary>Extra height, as a fraction of half the monitor height</summary>
+    </key>
+
+    <!-- Appearance -->
+    <key name="background-color" type="(dddd)">
+      <default>(0.0, 0.0, 0.0, 0.5)</default>
+      <summary>Background colour (RGBA, 0–1)</summary>
+    </key>
+    <key name="text-color" type="(dddd)">
+      <default>(1.0, 1.0, 1.0, 0.0)</default>
+      <summary>Text colour (RGBA, 0–1). Alpha 0 picks black or white automatically.</summary>
+    </key>
+    <key name="border-color" type="(dddd)">
+      <default>(1.0, 1.0, 1.0, 1.0)</default>
+      <summary>Border colour (RGBA, 0–1)</summary>
+    </key>
+    <key name="border-thickness" type="i">
+      <default>0</default>
+      <range min="0" max="8"/>
+      <summary>Border thickness in pixels</summary>
+    </key>
+    <key name="border-radius" type="i">
+      <default>16</default>
+      <range min="0" max="48"/>
+      <summary>Corner radius in pixels</summary>
+    </key>
+    <key name="font-size" type="i">
+      <default>0</default>
+      <range min="0" max="40"/>
+      <summary>Result font size in points (0 = theme default)</summary>
+    </key>
+    <key name="entry-font-size" type="i">
+      <default>16</default>
+      <range min="0" max="40"/>
+      <summary>Search box font size in points (0 = theme default)</summary>
+    </key>
+
+    <!-- Blur -->
+    <key name="blur-background" type="b">
+      <default>false</default>
+      <summary>Show a blurred copy of the wallpaper behind the popup</summary>
+    </key>
+    <key name="blur-sigma" type="d">
+      <default>30.0</default>
+      <range min="0.0" max="100.0"/>
+      <summary>Blur strength</summary>
+    </key>
+    <key name="blur-brightness" type="d">
+      <default>0.6</default>
+      <range min="0.0" max="1.0"/>
+      <summary>Brightness of the blurred wallpaper</summary>
+    </key>
+
+    <!-- Behaviour -->
+    <key name="show-panel-icon" type="b">
+      <default>false</default>
+      <summary>Show a search icon in the top bar</summary>
+    </key>
+    <key name="use-animations" type="b">
+      <default>true</default>
+      <summary>Animate the popup opening and closing</summary>
+    </key>
+    <key name="animation-speed" type="d">
+      <default>100.0</default>
+      <range min="0.0" max="1000.0"/>
+      <summary>Animation duration in milliseconds</summary>
+    </key>
+  </schema>
+</schemalist>

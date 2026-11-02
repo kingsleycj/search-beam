@@ -1,0 +1,8 @@
+{
+  "uuid": "search-beam@kingsleycj",
+  "name": "Search Beam",
+  "description": "A Spotlight-style search popup: GNOME's own search (apps, files, settings, calculator, web), pulled out of the Overview and opened with a shortcut. A GNOME 50 replacement for Search Light.",
+  "shell-version": ["50"],
+  "settings-schema": "org.gnome.shell.extensions.search-beam",
+  "version-name": "1.0"
+}

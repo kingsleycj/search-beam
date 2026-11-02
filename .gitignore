@@ -1,0 +1,8 @@
+build/
+test/headless/data/
+test/headless/config/
+test/headless/cache/
+test/headless/state/
+test/headless/shots/
+test/headless/bus
+test/headless/*.log

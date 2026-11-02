@@ -1,0 +1,81 @@
+/* SPDX-License-Identifier: GPL-2.0-or-later
+ *
+ * Base look. Colours, corner radius, border and font sizes come from the
+ * settings and are applied on top of this at runtime.
+ */
+
+#searchBeamBox {
+  box-shadow: 0 4px 8px 0 rgba(0, 0, 0, 0.2);
+}
+
+#searchBeamBox,
+#searchBeamBox * {
+  color: white;
+}
+
+#searchBeamBox.light,
+#searchBeamBox.light * {
+  color: black;
+}
+
+/* The Overview's search box, while it lives in the popup. */
+#searchBeamBox .search-beam-entry,
+#searchBeamBox .search-beam-entry:hover,
+#searchBeamBox .search-beam-entry:focus {
+  padding: 18px;
+  margin: 0;
+  border: 0;
+  border-radius: 8px;
+  background-color: transparent;
+  box-shadow: none;
+}
+
+#searchBeamBox .search-beam-entry StLabel.hint-text {
+  color: rgba(255, 255, 255, 0.6);
+}
+
+#searchBeamBox.light .search-beam-entry StLabel.hint-text {
+  color: rgba(0, 0, 0, 0.55);
+}
+
+#searchBeamBox #searchResultsContent {
+  padding-left: 12px;
+  padding-right: 12px;
+}
+
+/* Result rows and tiles */
+#searchBeamBox .overview-tile,
+#searchBeamBox .search-provider-icon,
+#searchBeamBox .list-search-provider-content,
+#searchBeamBox .list-search-result {
+  background-color: transparent;
+}
+
+#searchBeamBox .overview-tile:hover,
+#searchBeamBox .overview-tile:focus,
+#searchBeamBox .overview-tile:active,
+#searchBeamBox .search-provider-icon:hover,
+#searchBeamBox .search-provider-icon:focus,
+#searchBeamBox .search-provider-icon:active,
+#searchBeamBox .list-search-provider-content:hover,
+#searchBeamBox .list-search-provider-content:focus,
+#searchBeamBox .list-search-provider-content:active,
+#searchBeamBox .list-search-result:hover,
+#searchBeamBox .list-search-result:focus,
+#searchBeamBox .list-search-result:active {
+  background-color: rgba(128, 128, 128, 0.2);
+}
+
+#searchBeamBox .overview-tile:selected,
+#searchBeamBox .list-search-result:selected {
+  background-color: rgba(128, 128, 128, 0.4);
+}
+
+#searchBeamBox .search-section-content {
+  background-color: rgba(100, 100, 100, 0.2);
+  border-color: transparent;
+}
+
+#searchBeamBox.light .search-section-content {
+  background-color: rgba(50, 50, 50, 0.1);
+}
