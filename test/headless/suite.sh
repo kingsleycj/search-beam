@@ -20,7 +20,7 @@ TESTWIN=$!
 cleanup() {
   kill $TESTWIN 2>/dev/null
   pkill -f "[g]nome-tweaks" 2>/dev/null
-  setting blur-background false 2>/dev/null; setting show-panel-icon false 2>/dev/null; setting scale-height 0.01 2>/dev/null; setting answers-enabled false 2>/dev/null
+  setting blur-background false 2>/dev/null; setting show-panel-icon false 2>/dev/null; setting scale-height 0.01 2>/dev/null; setting answers-enabled false 2>/dev/null; setting show-preview true 2>/dev/null; setting scale-width 0.18 2>/dev/null
 }
 trap cleanup EXIT
 sleep 3
@@ -212,7 +212,52 @@ ev 'sbTest.type("serendipity")' >/dev/null; sleep 3
 check "answers off: no card" cardVisible false
 ev 'sbTest.chord("Escape")' >/dev/null; sleep 0.6
 
-echo "== 15. settings window opens"
+echo "== 15. preview panel"
+open_popup
+ev 'sbTest.type("sett")' >/dev/null; waitfor previewVisible true 5
+check "preview shows the top result" previewVisible true
+check "top app result previewed" previewTitle '"Settings"'
+check "apps are labelled as applications" previewType '"Application"'
+"$S/shot.sh" 15-preview-app >/dev/null
+before=$(field previewTitle)
+ev 'sbTest.chord("Tab")' >/dev/null; sleep 0.6
+after=$(field previewTitle)
+if [[ "$after" != "$before" && "$after" != null ]]; then echo "PASS  Tab moves the preview to the next result ($after)"; else echo "FAIL  Tab moves the preview to the next result (before $before, after $after)"; fi
+ev 'sbTest.chord("Escape")' >/dev/null; sleep 0.6
+
+open_popup
+ev 'sbTest.type("beamtest")' >/dev/null; waitfor previewTitle '"beamtest-notes.txt"' 5
+check "file result previewed" previewTitle '"beamtest-notes.txt"'
+waitfor previewDetailKeys '"Where,Size,Modified"' 5
+check "file details shown" previewDetailKeys '"Where,Size,Modified"'
+check "text file snippet shown" previewSnippet '"Search Beam preview test\nsecond line"'
+"$S/shot.sh" 15-preview-file >/dev/null
+xy=$("$S/ev.sh" 'JSON.stringify(sbTest.resultCenters().find(r => r.name === "beamtest-image.png"))' | python3 -c "import sys,ast,json; r=sys.stdin.read(); d=json.loads(json.loads(ast.literal_eval(r[r.index(chr(39)):r.rindex(chr(39))+1]))); print(d['x'], d['y'])")
+set -- $xy
+ev "sbTest.move($1, $2)" >/dev/null; waitfor previewTitle '"beamtest-image.png"' 3
+check "pointing at a result previews it" previewTitle '"beamtest-image.png"'
+waitfor previewImage true 3
+check "image file shows the picture" previewImage true
+"$S/shot.sh" 15-preview-image >/dev/null
+for i in $(seq 8); do ev 'sbTest.chord("BackSpace")' >/dev/null; done
+ev 'sbTest.type("zqzqzq")' >/dev/null; sleep 1
+check "preview hides when nothing matches" previewVisible false
+ev 'sbTest.chord("Escape")' >/dev/null; sleep 0.6
+
+setting show-preview false
+open_popup
+ev 'sbTest.type("sett")' >/dev/null; sleep 1
+check "preview off: no panel" previewVisible false
+ev 'sbTest.chord("Escape")' >/dev/null; sleep 0.6
+setting show-preview true
+setting scale-width 0.0
+open_popup
+ev 'sbTest.type("sett")' >/dev/null; sleep 1
+check "narrow popup (600px): no panel" previewVisible false
+ev 'sbTest.chord("Escape")' >/dev/null; sleep 0.6
+setting scale-width 0.18
+
+echo "== 16. settings window opens"
 DBUS_SESSION_BUS_ADDRESS="$(cat $S/bus)" WAYLAND_DISPLAY=search-beam-test XDG_CONFIG_HOME=$S/config XDG_DATA_HOME=$S/data gnome-extensions prefs $UUID; sleep 4
 check "settings window focused" focusWindow '"Search Beam"'
 

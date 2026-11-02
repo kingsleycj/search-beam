@@ -94,6 +94,13 @@ export default class SearchBeamPreferences extends ExtensionPreferences {
         settings.bind('show-panel-icon', panelRow, 'active', Gio.SettingsBindFlags.DEFAULT);
         behaviour.add(panelRow);
 
+        const previewRow = new Adw.SwitchRow({
+            title: 'Preview panel',
+            subtitle: 'Show details of the selected result beside the results (popup width of 640 pixels or more)',
+        });
+        settings.bind('show-preview', previewRow, 'active', Gio.SettingsBindFlags.DEFAULT);
+        behaviour.add(previewRow);
+
         const animRow = new Adw.SwitchRow({title: 'Animations'});
         settings.bind('use-animations', animRow, 'active', Gio.SettingsBindFlags.DEFAULT);
         behaviour.add(animRow);

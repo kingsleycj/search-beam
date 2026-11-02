@@ -29,6 +29,10 @@ from scratch for the current GNOME Shell APIs.
   background.
 - **Multi-monitor.** It can open on your primary monitor, a chosen monitor, or
   whichever monitor the pointer is on.
+- **Preview panel.** The selected result is shown beside the list, as in
+  Spotlight: an app's icon and description, or a file's thumbnail (or the
+  picture itself), location, size, date and, for text files, its first lines.
+  Arrow keys, Tab or just pointing at a result changes what's previewed.
 - **Answers in the popup (optional).** Type a word to get its definition from
   Wiktionary, or a name or question ("Paris", "capital of nigeria") to get a
   Wikipedia summary with a picture. Click it or press Ctrl+Enter to read the
@@ -37,8 +41,10 @@ from scratch for the current GNOME Shell APIs.
 - **Easy move from Search Light.** One command copies your Search Light
   settings across.
 
-| Compact | Blurred wallpaper |
+| Answer card | Reading the full entry |
 | --- | --- |
+| ![A Wikipedia answer card for "Paris"](docs/answer.png) | ![The reader showing the Paris article](docs/reader.png) |
+| **Compact** | **Blurred wallpaper** |
 | ![The compact search bar](docs/compact.png) | ![Results over a blurred wallpaper](docs/blur.png) |
 
 ## Requirements
@@ -75,7 +81,7 @@ The default shortcut is **Ctrl+Super+Space**. When you update later, run
 | Press the shortcut | Open the popup (press it again to close) |
 | Type | Search |
 | **Enter** | Open the top result |
-| **↓ ↑ ← →** / **Tab** | Move between results |
+| **↓ ↑ ← →** / **Tab**, or point at a result | Move between results (the preview follows) |
 | Click a result | Open it |
 | **Ctrl+Enter**, or click the answer card | Read the full definition or article in the popup |
 | **↑ ↓ / Page Up / Page Down** (while reading) | Scroll the article |
@@ -102,6 +108,7 @@ gnome-extensions prefs search-beam@kingsleycj.github.io
 | Follow the mouse | Open on the monitor under the pointer instead |
 | Look up answers online | Show Wiktionary definitions and Wikipedia summaries in the popup (off by default) |
 | Wikipedia language code | Which Wikipedia to use: `en`, `fr`, `de`, `pt-br`… (definitions are English only) |
+| Preview panel | Show details of the selected result beside the list (needs a popup at least 640 px wide) |
 | Top bar icon | Show a search button in the top bar |
 | Animations / Animation length | Fade-and-zoom when opening and closing |
 | Width / Height | Extra room on top of the 600 × 400 base size, as a share of half the monitor |
@@ -222,11 +229,13 @@ when the popup closes or the extension is disabled.
 | `popup.js` | The popup: borrowing and returning the search, layout, styling, blur |
 | `answers.js` | Online answers: when to look up, Wiktionary/Wikipedia requests, parsing |
 | `answerView.js` | The answer card and the reader |
+| `previewInfo.js` | File details for the preview: kind, location, size, date, thumbnail, text snippet |
+| `previewView.js` | The preview panel |
 | `prefs.js` | Settings window (GTK 4 / libadwaita) |
 | `stylesheet.css` | Base look; colours and sizes from settings are applied on top at runtime |
 | `schemas/` | Settings keys (names match Search Light's where they overlap) |
 | `tools/import-search-light.py` | Search Light settings importer |
-| `test/unit/` | Unit tests for the answer logic (`gjs -m test/unit/answers.test.js`) |
+| `test/unit/` | Unit tests for the answer and preview logic (`gjs -m test/unit/answers.test.js`, `gjs -m test/unit/preview.test.js`) |
 | `test/headless/` | Automated tests in a throwaway GNOME Shell |
 
 ```sh
@@ -237,11 +246,12 @@ make install   # install it for your user (then log out and back in)
 ### Testing without logging out
 
 `test/headless/` starts a separate, headless GNOME Shell with its own settings,
-loads Search Beam in it, and runs about 70 checks: opening and closing,
+loads Search Beam in it, and runs about 80 checks: opening and closing,
 clearing the search, focus returning to the previous window, launching
 results, Activities search still working, staying clear of the top bar, blur,
-disabling while open, the settings window, the top-bar button and online
-answers (skipped automatically when Wikimedia can't be reached). It never touches your running session. See
+disabling while open, the settings window, the top-bar button, the preview
+panel (using a built-in test provider with real files) and online answers
+(skipped automatically when Wikimedia can't be reached). It never touches your running session. See
 [test/headless/README.md](test/headless/README.md), and read its note about
 when it's safe to stop the test shell.
 

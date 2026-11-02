@@ -97,6 +97,13 @@
       <description>Which Wikipedia to use, e.g. en, fr, de, pt-br. Definitions are English only.</description>
     </key>
 
+    <!-- Preview -->
+    <key name="show-preview" type="b">
+      <default>true</default>
+      <summary>Show a preview of the selected result</summary>
+      <description>A panel beside the results with details of the selected app, file or item. Needs a popup at least 640 pixels wide.</description>
+    </key>
+
     <!-- Behaviour -->
     <key name="show-panel-icon" type="b">
       <default>false</default>

@@ -18,6 +18,8 @@ import * as Background from 'resource:///org/gnome/shell/ui/background.js';
 
 import {AnswerService, planLookup} from './answers.js';
 import {AnswerCard, AnswerReader} from './answerView.js';
+import {describeFile} from './previewInfo.js';
+import {PreviewPane} from './previewView.js';
 
 // Base size in logical pixels; scale-width/scale-height add a fraction of half
 // the monitor on top. At 100% display scaling this matches Search Light's
@@ -30,11 +32,19 @@ const STYLE_KEYS = [
     'background-color', 'text-color', 'border-color', 'border-thickness',
     'border-radius', 'font-size', 'entry-font-size',
 ];
-const LAYOUT_KEYS = ['scale-width', 'scale-height'];
+const LAYOUT_KEYS = ['scale-width', 'scale-height', 'show-preview'];
 const ANSWER_KEYS = ['answers-enabled', 'answers-language'];
 
 // Wait for a pause in typing before looking anything up online.
 const LOOKUP_DELAY_MS = 400;
+
+// The preview panel takes this share of the popup's width, and only appears
+// when the popup is wide enough for results and preview side by side.
+const PREVIEW_SHARE = 0.38;
+const MIN_PREVIEW_WIDTH = 640;
+// GNOME announces no change of the highlighted top result (results arrive
+// asynchronously), so the panel checks for one this often while open.
+const PREVIEW_POLL_MS = 250;
 const BLUR_KEYS = ['blur-background', 'blur-sigma', 'blur-brightness'];
 
 const MASK_DECLARATIONS = `
@@ -152,6 +162,22 @@ export class SearchBeamPopup {
         this._card = new AnswerCard();
         this._card.connect('activate', () => this._openReader());
         this._box.add_child(this._card);
+
+        // GNOME's results and the preview panel, side by side.
+        this._resultsRow = new St.BoxLayout({
+            style_class: 'search-beam-results-row',
+            x_expand: true,
+            y_expand: true,
+        });
+        this._preview = new PreviewPane();
+        this._resultsRow.add_child(this._preview);
+        this._box.add_child(this._resultsRow);
+        this._previewAllowed = false;
+        this._previewPollId = 0;
+        this._previewCancellable = null;
+        this._hoverResult = null;
+        this._previewedResult = null;
+        this._trackOwners = {_hoverResult: {}, _previewedResult: {}};
         this._reader = new AnswerReader();
         this._reader.connect('back', () => this._closeReader());
         this._reader.connect('open-url', (reader, url) => this._openUrl(url));
@@ -282,6 +308,10 @@ export class SearchBeamPopup {
         this._entry.grab_key_focus();
 
         this._connectWhileOpen();
+        this._previewPollId = GLib.timeout_add(GLib.PRIORITY_DEFAULT, PREVIEW_POLL_MS, () => {
+            this._syncPreview();
+            return GLib.SOURCE_CONTINUE;
+        });
 
         // Measure the search box again once it has been styled and shown
         // (a new font size only settles after the first frame).
@@ -309,6 +339,11 @@ export class SearchBeamPopup {
             this._relayoutId = 0;
         }
         this._resetAnswers();
+        if (this._previewPollId) {
+            GLib.source_remove(this._previewPollId);
+            this._previewPollId = 0;
+        }
+        this._resetPreview();
 
         // Stop typing into a popup that's fading out.
         const focus = global.stage.get_key_focus();
@@ -393,9 +428,10 @@ export class SearchBeamPopup {
 
         this._detach(entry);
         this._detach(controller);
-        // Order in the box: search entry, answer card, results, reader.
+        // Order in the box: search entry, answer card, results row (results
+        // + preview), reader.
         this._box.insert_child_at_index(entry, 0);
-        this._box.insert_child_above(controller, this._card);
+        this._resultsRow.insert_child_at_index(controller, 0);
         entry.add_style_class_name('search-beam-entry');
 
         controller.connectObject('notify::search-active',
@@ -461,10 +497,11 @@ export class SearchBeamPopup {
         entry.clutter_text.disconnectObject(this);
         entry.remove_style_class_name('search-beam-entry');
         this._resetAnswers();
+        this._resetPreview();
 
         // Taking the controller out clears the search text (via our reset
         // override, so key focus is left alone), so restore overrides after.
-        this._box.remove_child(controller);
+        this._resultsRow.remove_child(controller);
         this._box.remove_child(entry);
         entry.text = '';
 
@@ -535,8 +572,10 @@ export class SearchBeamPopup {
 
     _onKeyFocusChanged() {
         const focus = global.stage.get_key_focus();
-        if (focus && (this.actor.contains(focus) || this._isOurMenu(focus)))
+        if (focus && (this.actor.contains(focus) || this._isOurMenu(focus))) {
+            this._syncPreview();
             return;
+        }
         this.hide();
     }
 
@@ -544,6 +583,15 @@ export class SearchBeamPopup {
     // where nothing takes focus. The click still goes through.
     _onStageCapturedEvent(event) {
         const type = event.type();
+        if (type === Clutter.EventType.MOTION) {
+            // Pointing at a result previews it, as in Spotlight.
+            const hovered = this._resultFor(global.stage.get_event_actor(event));
+            if (hovered && hovered !== this._hoverResult) {
+                this._track('_hoverResult', hovered);
+                this._syncPreview();
+            }
+            return Clutter.EVENT_PROPAGATE;
+        }
         if (type !== Clutter.EventType.BUTTON_PRESS &&
             type !== Clutter.EventType.TOUCH_BEGIN)
             return Clutter.EVENT_PROPAGATE;
@@ -622,6 +670,7 @@ export class SearchBeamPopup {
     }
 
     _onQueryChanged() {
+        this._track('_hoverResult', null);
         this._resetAnswers();
         if (!this._settings.get_boolean('answers-enabled'))
             return;
@@ -684,7 +733,7 @@ export class SearchBeamPopup {
         // Hiding the results unmaps GNOME's search controller, which resets
         // (clears) the search; keep the text while the reader covers them.
         this._holdSearch = true;
-        this._controller.hide();
+        this._resultsRow.hide();
         this._holdSearch = false;
         this._reader.showAnswer(answer);
         this._reader.show();
@@ -710,10 +759,9 @@ export class SearchBeamPopup {
         if (!this._reader.visible)
             return;
         this._reader.hide();
+        this._resultsRow.show();
         if (this._card.answer)
             this._card.show();
-        if (this._controller?.searchActive)
-            this._controller.show();
     }
 
     _openUrl(url) {
@@ -727,6 +775,108 @@ export class SearchBeamPopup {
             return;
         }
         this.hide({restoreFocus: false});
+    }
+
+    // --- preview panel ----------------------------------------------------
+
+    // The result (an app icon or a search result row) that contains actor,
+    // if actor is inside GNOME's results.
+    _resultFor(actor) {
+        let found = null;
+        for (let a = actor; a; a = a.get_parent()) {
+            if (a === this._controller)
+                return found;
+            if (!found && (a.app || a.metaInfo))
+                found = a;
+        }
+        return null;
+    }
+
+    // GNOME destroys result actors whenever the results refresh. Remember a
+    // result only together with a destroy hook that forgets it, so it's never
+    // touched after it's gone.
+    _track(slot, actor) {
+        const owner = this._trackOwners[slot];
+        this[slot]?.disconnectObject(owner);
+        this[slot] = actor;
+        actor?.connectObject('destroy', () => {
+            this[slot] = null;
+        }, owner);
+    }
+
+    // What to preview: the result with keyboard focus, else the one under
+    // the pointer, else GNOME's highlighted top result.
+    _previewTarget() {
+        if (!this._acquired || !this._previewAllowed || this._reader.visible ||
+            !this._controller.searchActive)
+            return null;
+        const focused = this._resultFor(global.stage.get_key_focus());
+        if (focused)
+            return focused;
+        if (this._hoverResult && this._resultFor(this._hoverResult))
+            return this._hoverResult;
+        const top = this._controller._searchResults?._defaultResult ?? null;
+        return top && this._resultFor(top) ? top : null;
+    }
+
+    _syncPreview() {
+        if (!this._visible)
+            return;
+        const target = this._previewTarget();
+        if (target === this._previewedResult && (target !== null) === this._preview.visible)
+            return;
+
+        this._track('_previewedResult', target);
+        this._previewCancellable?.cancel();
+        this._previewCancellable = null;
+        if (!target) {
+            this._preview.hide();
+            return;
+        }
+
+        const info = this._describeResult(target);
+        this._preview.setInfo(info);
+        this._preview.show();
+        if (!info.fileUri)
+            return;
+
+        // Files: show the name straight away, then the details once read.
+        const cancellable = this._previewCancellable = new Gio.Cancellable();
+        describeFile(info.fileUri, cancellable).then(fileInfo => {
+            if (fileInfo && this._visible && this._previewedResult === target)
+                this._preview.setInfo(fileInfo);
+        }).catch(() => {
+            // Cancelled because the selection moved on.
+        });
+    }
+
+    _describeResult(result) {
+        if (result.app) {
+            const app = result.app;
+            return {
+                title: app.get_name(),
+                typeLabel: 'Application',
+                description: app.get_description() ?? '',
+                createIcon: size => app.create_icon_texture(size),
+            };
+        }
+        const meta = result.metaInfo;
+        const id = meta.id ?? '';
+        return {
+            title: meta.name ?? '',
+            typeLabel: result.provider?.appInfo?.get_name() ?? '',
+            description: meta.description ?? '',
+            createIcon: size => meta.createIcon?.(size) ?? null,
+            fileUri: id.startsWith('file://') ? id : null,
+        };
+    }
+
+    _resetPreview() {
+        this._previewCancellable?.cancel();
+        this._previewCancellable = null;
+        this._track('_hoverResult', null);
+        this._track('_previewedResult', null);
+        this._preview.hide();
     }
 
     // --- geometry -------------------------------------------------------
@@ -778,6 +928,18 @@ export class SearchBeamPopup {
         this.actor.set_position(x, y);
         this.actor.set_size(width, height);
         this._geometry = {x, y, width, height};
+
+        this._previewAllowed = this._settings.get_boolean('show-preview') &&
+            width >= MIN_PREVIEW_WIDTH * scale;
+        this._preview.width = Math.round(width * PREVIEW_SHARE);
+        if (!this._previewAllowed)
+            this._preview.hide();
+        // With the panel taking room, the stylesheet folds GNOME's provider
+        // column (Files, Settings…) down to just its icon.
+        if (this._previewAllowed)
+            this._box.add_style_class_name('search-beam-previewing');
+        else
+            this._box.remove_style_class_name('search-beam-previewing');
         this._layoutBlur();
     }
 
@@ -874,8 +1036,10 @@ export class SearchBeamPopup {
             this._updateStyle();
         if (BLUR_KEYS.includes(key) && this._visible)
             this._syncBlur();
-        if ((STYLE_KEYS.includes(key) || LAYOUT_KEYS.includes(key)) && this._visible)
+        if ((STYLE_KEYS.includes(key) || LAYOUT_KEYS.includes(key)) && this._visible) {
             this._layout();
+            this._syncPreview();
+        }
         if (ANSWER_KEYS.includes(key) && this._acquired)
             this._onQueryChanged();
     }
