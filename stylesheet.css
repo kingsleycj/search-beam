@@ -2,6 +2,9 @@
  *
  * Base look. Colours, corner radius, border and font sizes come from the
  * settings and are applied on top of this at runtime.
+ *
+ * The result-row rules below are adapted from Search Light's stylesheet by
+ * icedman (https://github.com/icedman/search-light, GPL-2.0-or-later).
  */
 
 #searchBeamBox {
@@ -78,4 +81,135 @@
 
 #searchBeamBox.light .search-section-content {
   background-color: rgba(50, 50, 50, 0.1);
+}
+
+/* Online answers: card above the results */
+#searchBeamBox .search-beam-answer {
+  margin: 4px 12px 8px 12px;
+  padding: 12px 14px;
+  border-radius: 12px;
+  background-color: rgba(255, 255, 255, 0.06);
+  text-align: left;
+}
+
+#searchBeamBox .search-beam-answer:hover {
+  background-color: rgba(255, 255, 255, 0.10);
+}
+
+#searchBeamBox.light .search-beam-answer {
+  background-color: rgba(0, 0, 0, 0.05);
+}
+
+#searchBeamBox.light .search-beam-answer:hover {
+  background-color: rgba(0, 0, 0, 0.09);
+}
+
+#searchBeamBox .search-beam-answer-row {
+  spacing: 12px;
+}
+
+#searchBeamBox .search-beam-answer-thumb {
+  border-radius: 8px;
+}
+
+#searchBeamBox .search-beam-answer-title {
+  font-weight: bold;
+  font-size: 1.15em;
+}
+
+#searchBeamBox .search-beam-answer-source,
+#searchBeamBox .search-beam-answer-subtitle,
+#searchBeamBox .search-beam-answer-hint,
+#searchBeamBox .search-beam-reader-example,
+#searchBeamBox .search-beam-reader-status,
+#searchBeamBox .search-beam-reader-footer {
+  color: rgba(255, 255, 255, 0.65);
+}
+
+#searchBeamBox.light .search-beam-answer-source,
+#searchBeamBox.light .search-beam-answer-subtitle,
+#searchBeamBox.light .search-beam-answer-hint,
+#searchBeamBox.light .search-beam-reader-example,
+#searchBeamBox.light .search-beam-reader-status,
+#searchBeamBox.light .search-beam-reader-footer {
+  color: rgba(0, 0, 0, 0.6);
+}
+
+#searchBeamBox .search-beam-answer-source {
+  font-size: 0.8em;
+  font-weight: bold;
+}
+
+#searchBeamBox .search-beam-answer-summary {
+  margin-top: 4px;
+}
+
+#searchBeamBox .search-beam-answer-hint {
+  margin-top: 6px;
+  font-size: 0.85em;
+}
+
+#searchBeamBox.search-beam-has-answer .search-statustext {
+  color: transparent !important;
+}
+
+/* Online answers: reader in place of the results */
+#searchBeamBox .search-beam-reader {
+  padding: 0 12px 12px 12px;
+}
+
+#searchBeamBox .search-beam-reader-header {
+  spacing: 6px;
+  padding-bottom: 6px;
+}
+
+#searchBeamBox .search-beam-reader-title {
+  font-weight: bold;
+  font-size: 1.2em;
+  margin-left: 4px;
+}
+
+#searchBeamBox .search-beam-reader-button {
+  padding: 6px;
+  border-radius: 99px;
+}
+
+#searchBeamBox .search-beam-reader-button:hover {
+  background-color: rgba(128, 128, 128, 0.25);
+}
+
+#searchBeamBox .search-beam-reader-content {
+  padding: 4px 6px;
+  spacing: 8px;
+}
+
+#searchBeamBox .search-beam-reader-heading {
+  font-weight: bold;
+  font-size: 1.1em;
+  margin-top: 8px;
+}
+
+#searchBeamBox .search-beam-reader-subheading {
+  font-weight: bold;
+  margin-top: 4px;
+}
+
+#searchBeamBox .search-beam-reader-example {
+  font-style: italic;
+  margin-left: 18px;
+}
+
+#searchBeamBox .search-beam-reader-more {
+  padding: 6px 12px;
+  border-radius: 99px;
+  background-color: rgba(128, 128, 128, 0.2);
+}
+
+#searchBeamBox .search-beam-reader-more:hover {
+  background-color: rgba(128, 128, 128, 0.32);
+}
+
+#searchBeamBox .search-beam-reader-footer {
+  font-size: 0.8em;
+  margin-top: 8px;
 }

@@ -20,7 +20,7 @@ TESTWIN=$!
 cleanup() {
   kill $TESTWIN 2>/dev/null
   pkill -f "[g]nome-tweaks" 2>/dev/null
-  setting blur-background false 2>/dev/null; setting show-panel-icon false 2>/dev/null; setting scale-height 0.01 2>/dev/null
+  setting blur-background false 2>/dev/null; setting show-panel-icon false 2>/dev/null; setting scale-height 0.01 2>/dev/null; setting answers-enabled false 2>/dev/null
 }
 trap cleanup EXIT
 sleep 3
@@ -146,7 +146,73 @@ check "slow click opens popup" visible true
 ev "sbTest.press($1, $2)" >/dev/null; sleep 0.4; ev 'sbTest.release()' >/dev/null; sleep 1
 check "slow click closes it" visible false
 
-echo "== 14. settings window opens"
+echo "== 14. online answers (needs internet)"
+waitfor() { # field expected [seconds]
+  for i in $(seq $(( ${3:-10} * 4 ))); do [[ "$(field "$1")" == "$2" ]] && return 0; sleep 0.25; done; return 1; }
+online=1
+for u in https://en.wiktionary.org/api/rest_v1/page/definition/serendipity https://en.wikipedia.org/api/rest_v1/page/summary/Paris; do
+  curl -s -o /dev/null --max-time 8 -A "SearchBeam-tests" -w '%{http_code}' "$u" | grep -q 200 || online=0
+done
+if [ $online = 0 ]; then
+  echo "SKIP  online answers: Wikimedia isn't reachable from this machine right now"
+else
+setting show-panel-icon false
+setting answers-enabled true
+open_popup
+ev 'sbTest.type("serendipity")' >/dev/null; waitfor cardVisible true 12
+check "word: definition card appears" cardVisible true
+check "word: from Wiktionary" cardSource '"Wiktionary"'
+check "word: right entry" cardTitle '"serendipity"'
+"$S/shot.sh" 14-answer-word >/dev/null
+ev 'sbTest.chord("Control_L", "Return")' >/dev/null; sleep 0.8
+check "Ctrl+Enter opens the reader" readerVisible true
+check "reader replaces the results" controllerVisible false
+check "search text kept while reading" text '"serendipity"'
+ev 'sbTest.chord("Return")' >/dev/null; sleep 0.8
+check "Enter in the reader doesn't launch a result" visible true
+ev 'sbTest.chord("Escape")' >/dev/null; sleep 0.6
+check "Esc closes the reader" readerVisible false
+check "Esc keeps the popup open" visible true
+check "card is back" cardVisible true
+ev 'sbTest.chord("Escape")' >/dev/null; sleep 0.6
+check "second Esc closes the popup" visible false
+
+open_popup
+ev 'sbTest.type("Paris")' >/dev/null; waitfor cardVisible true 12
+check "name: Wikipedia card appears" cardSource '"Wikipedia"'
+check "name: right article" cardTitle '"Paris"'
+waitfor cardThumb true 10
+check "name: thumbnail loads" cardThumb true
+"$S/shot.sh" 14-answer-name >/dev/null
+set -- $(field cardX) $(field cardY)
+ev "sbTest.click($1, $2)" >/dev/null; sleep 0.5
+check "clicking the card opens the reader" readerVisible true
+for i in $(seq 40); do [ "$(field readerBlocks)" -gt 5 ] 2>/dev/null && break; sleep 0.25; done
+echo "reader blocks after load: $(field readerBlocks)"
+ev 'sbTest.chord("Page_Down")' >/dev/null; sleep 0.4
+check "Page Down scrolls the article" readerScrolled true
+"$S/shot.sh" 14-reader >/dev/null
+ev 'sbTest.type("x")' >/dev/null; sleep 0.5
+check "typing closes the reader" readerVisible false
+ev 'sbTest.chord("Escape")' >/dev/null; sleep 0.6
+
+open_popup
+ev 'sbTest.type("firef")' >/dev/null; sleep 3
+check "partial app name: no card" cardVisible false
+ev 'sbTest.chord("Escape")' >/dev/null; sleep 0.6
+open_popup
+ev 'sbTest.type("5 km in miles")' >/dev/null; sleep 3
+check "conversion: no card (Calculator's job)" cardVisible false
+ev 'sbTest.chord("Escape")' >/dev/null; sleep 0.6
+
+fi
+setting answers-enabled false
+open_popup
+ev 'sbTest.type("serendipity")' >/dev/null; sleep 3
+check "answers off: no card" cardVisible false
+ev 'sbTest.chord("Escape")' >/dev/null; sleep 0.6
+
+echo "== 15. settings window opens"
 DBUS_SESSION_BUS_ADDRESS="$(cat $S/bus)" WAYLAND_DISPLAY=search-beam-test XDG_CONFIG_HOME=$S/config XDG_DATA_HOME=$S/data gnome-extensions prefs $UUID; sleep 4
 check "settings window focused" focusWindow '"Search Beam"'
 

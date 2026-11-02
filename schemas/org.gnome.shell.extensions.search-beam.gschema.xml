@@ -85,6 +85,18 @@
       <summary>Brightness of the blurred wallpaper</summary>
     </key>
 
+    <!-- Online answers -->
+    <key name="answers-enabled" type="b">
+      <default>false</default>
+      <summary>Look up answers online</summary>
+      <description>Show Wiktionary definitions and Wikipedia summaries in the popup. What you type is sent to Wikimedia after you pause typing.</description>
+    </key>
+    <key name="answers-language" type="s">
+      <default>'en'</default>
+      <summary>Wikipedia language code</summary>
+      <description>Which Wikipedia to use, e.g. en, fr, de, pt-br. Definitions are English only.</description>
+    </key>
+
     <!-- Behaviour -->
     <key name="show-panel-icon" type="b">
       <default>false</default>

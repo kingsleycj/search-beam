@@ -11,6 +11,18 @@ export default class Helper extends Extension {
         const ptr = seat.create_virtual_device(Clutter.InputDeviceType.POINTER_DEVICE);
         const t = () => GLib.get_monotonic_time();
         const find = () => Main.layoutManager.uiGroup.get_children().find(a => a.name === 'searchBeam');
+        const findByName = (root, name) => {
+            if (!root)
+                return null;
+            if (root.name === name)
+                return root;
+            for (const child of root.get_children()) {
+                const found = findByName(child, name);
+                if (found)
+                    return found;
+            }
+            return null;
+        };
         globalThis.sbTest = {
             chord(...names) {
                 const ks = names.map(n => Clutter[`KEY_${n}`]);
@@ -60,6 +72,22 @@ export default class Helper extends Extension {
                     })(),
                     focusWindow: global.display.focus_window?.title ?? null,
                     overview: Main.overview.visible,
+                    controllerVisible: Main.overview.searchController.visible,
+                    ...(() => {
+                        const card = findByName(a, 'searchBeamAnswer');
+                        const reader = findByName(a, 'searchBeamReader');
+                        return {
+                            cardVisible: !!card?.visible,
+                            cardTitle: card?.answer?.title ?? null,
+                            cardSource: card?.answer?.source ?? null,
+                            cardThumb: !!card?._thumb?.visible,
+                            cardX: card ? Math.round(card.get_transformed_position()[0] + card.width / 2) : null,
+                            cardY: card ? Math.round(card.get_transformed_position()[1] + card.height / 2) : null,
+                            readerVisible: !!reader?.visible,
+                            readerBlocks: reader?._content?.get_n_children() ?? 0,
+                            readerScrolled: (reader?.scrollPosition ?? 0) > 0,
+                        };
+                    })(),
                     toggleOwn: Object.prototype.hasOwnProperty.call(Main.overview, 'toggle') || Object.prototype.hasOwnProperty.call(Main.overview, 'hide'),
                 };
             },

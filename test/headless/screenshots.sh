@@ -39,6 +39,19 @@ read -r PX PY PW PH <<<"$(val 'const w = global.get_window_actors().map(a => a.m
 "$S/shot.sh" prefs-general >/dev/null; crop prefs-general $((PX-M)) $((PY-M)) $((PW+2*M)) $((PH+2*M))
 ev "sbTest.click($((PX+PW/2+64)), $((PY+23)))"; sleep 1
 "$S/shot.sh" prefs-appearance >/dev/null; crop prefs-appearance $((PX-M)) $((PY-M)) $((PW+2*M)) $((PH+2*M))
+setting answers-enabled true
+ev 'sbTest.chord("Alt_L","space")'; sleep 1
+ev 'sbTest.type("Paris")'
+for i in $(seq 48); do [ "$("$S/ev.sh" 'JSON.stringify(sbTest.popup())' | python3 "$S/field.py" cardThumb)" = true ] && break; sleep 0.25; done
+"$S/shot.sh" answer >/dev/null; crop answer $((X-M)) $((Y-M)) $((W+2*M)) $((405+2*M))
+read -r CX CY <<<"$(val 'const p = sbTest.popup(); [p.cardX, p.cardY].join(" ")')"
+ev "sbTest.click($CX, $CY)"
+for i in $(seq 40); do [ "$("$S/ev.sh" 'JSON.stringify(sbTest.popup())' | python3 "$S/field.py" readerBlocks)" -gt 5 ] 2>/dev/null && break; sleep 0.25; done
+sleep 0.5
+"$S/shot.sh" reader >/dev/null; crop reader $((X-M)) $((Y-M)) $((W+2*M)) $((405+2*M))
+ev 'sbTest.chord("Escape")'; sleep 0.3; ev 'sbTest.chord("Escape")'; sleep 0.5
+setting answers-enabled false
+
 setting animation-speed 100.0
 ev 'global.get_window_actors().map(a => a.meta_window).find(w => w.title === "Search Beam")?.delete(global.get_current_time())'
 ls -la "$ROOT/docs"

@@ -29,6 +29,10 @@ from scratch for the current GNOME Shell APIs.
   background.
 - **Multi-monitor.** It can open on your primary monitor, a chosen monitor, or
   whichever monitor the pointer is on.
+- **Answers in the popup (optional).** Type a word to get its definition from
+  Wiktionary, or a name or question ("Paris", "capital of nigeria") to get a
+  Wikipedia summary with a picture. Click it or press Ctrl+Enter to read the
+  whole entry right there, without a browser. Off until you switch it on.
 - **Optional top-bar button** for opening it with the mouse.
 - **Easy move from Search Light.** One command copies your Search Light
   settings across.
@@ -73,7 +77,9 @@ The default shortcut is **Ctrl+Super+Space**. When you update later, run
 | **Enter** | Open the top result |
 | **↓ ↑ ← →** / **Tab** | Move between results |
 | Click a result | Open it |
-| **Esc** | Close and return to the window you were in |
+| **Ctrl+Enter**, or click the answer card | Read the full definition or article in the popup |
+| **↑ ↓ / Page Up / Page Down** (while reading) | Scroll the article |
+| **Esc** | Leave the reader; otherwise close and return to the window you were in |
 | Click outside, or switch window | Close |
 | **Super** | Close (Activities stays closed) |
 
@@ -94,6 +100,8 @@ gnome-extensions prefs search-beam@kingsleycj.github.io
 | Open search / Second shortcut | Shortcuts that toggle the popup. Click a row, then press the new combination: Ctrl, Alt or Super with a key, or an F-key (Backspace clears it). The first time, GNOME asks whether to let Extensions *inhibit shortcuts*. Choose **Allow** so the dialog can record combinations GNOME normally keeps for itself. |
 | Monitor | Which monitor to open on |
 | Follow the mouse | Open on the monitor under the pointer instead |
+| Look up answers online | Show Wiktionary definitions and Wikipedia summaries in the popup (off by default) |
+| Wikipedia language code | Which Wikipedia to use: `en`, `fr`, `de`, `pt-br`… (definitions are English only) |
 | Top bar icon | Show a search button in the top bar |
 | Animations / Animation length | Fade-and-zoom when opening and closing |
 | Width / Height | Extra room on top of the 600 × 400 base size, as a share of half the monitor |
@@ -116,6 +124,26 @@ gsettings set org.gnome.desktop.wm.keybindings activate-window-menu "[]"
 Then set Alt+Space in Search Beam's settings. You can also check
 **Settings → Keyboard → View and Customise Shortcuts** for anything else that
 clashes.
+
+## Online answers and privacy
+
+Answers are **off by default**. Turn them on under **Settings → General →
+Answers**. When they're on:
+
+- A lookup only happens after you pause typing, and only for real words,
+  names or phrases. App-name fragments ("firef") and sums ("5 km in miles",
+  which GNOME's Calculator already answers) are skipped.
+- What you typed is sent to Wikimedia (en.wiktionary.org, and the Wikipedia
+  you chose). Nothing is sent anywhere else, and nothing is stored on disk;
+  recent answers are kept in memory until you log out.
+- Single lowercase words try the dictionary first; capitalised words and
+  phrases go to Wikipedia. Type `define <word>` to force a definition.
+- The reader's **Copy** button puts the entry's text on the clipboard, and
+  **Open in browser** opens the full page if you want it.
+
+Text comes from Wikipedia and Wiktionary under
+[CC BY-SA 4.0](https://creativecommons.org/licenses/by-sa/4.0/); the reader
+credits the source on every entry.
 
 ## Coming from Search Light
 
@@ -192,10 +220,13 @@ when the popup closes or the extension is disabled.
 | --- | --- |
 | `extension.js` | Enable/disable, shortcuts, top-bar button |
 | `popup.js` | The popup: borrowing and returning the search, layout, styling, blur |
+| `answers.js` | Online answers: when to look up, Wiktionary/Wikipedia requests, parsing |
+| `answerView.js` | The answer card and the reader |
 | `prefs.js` | Settings window (GTK 4 / libadwaita) |
 | `stylesheet.css` | Base look; colours and sizes from settings are applied on top at runtime |
 | `schemas/` | Settings keys (names match Search Light's where they overlap) |
 | `tools/import-search-light.py` | Search Light settings importer |
+| `test/unit/` | Unit tests for the answer logic (`gjs -m test/unit/answers.test.js`) |
 | `test/headless/` | Automated tests in a throwaway GNOME Shell |
 
 ```sh
@@ -206,10 +237,11 @@ make install   # install it for your user (then log out and back in)
 ### Testing without logging out
 
 `test/headless/` starts a separate, headless GNOME Shell with its own settings,
-loads Search Beam in it, and runs 49 checks: opening and closing, clearing
-the search, focus returning to the previous window, launching results,
-Activities search still working, staying clear of the top bar, blur, disabling
-while open, the settings window and the top-bar button. It never touches your running session. See
+loads Search Beam in it, and runs about 70 checks: opening and closing,
+clearing the search, focus returning to the previous window, launching
+results, Activities search still working, staying clear of the top bar, blur,
+disabling while open, the settings window, the top-bar button and online
+answers (skipped automatically when Wikimedia can't be reached). It never touches your running session. See
 [test/headless/README.md](test/headless/README.md), and read its note about
 when it's safe to stop the test shell.
 

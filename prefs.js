@@ -67,6 +67,25 @@ export default class SearchBeamPreferences extends ExtensionPreferences {
         placement.add(cursorRow);
         page.add(placement);
 
+        const answers = new Adw.PreferencesGroup({
+            title: 'Answers',
+            description: 'Definitions from Wiktionary and summaries from Wikipedia, shown in the popup. ' +
+                'Click an answer or press Ctrl+Enter to read the whole entry.',
+        });
+        const answersRow = new Adw.SwitchRow({
+            title: 'Look up answers online',
+            subtitle: 'After you pause typing, your search is sent to Wikimedia',
+        });
+        settings.bind('answers-enabled', answersRow, 'active', Gio.SettingsBindFlags.DEFAULT);
+        answers.add(answersRow);
+        const languageRow = new Adw.EntryRow({
+            title: 'Wikipedia language code (en, fr, de, pt-br…)',
+        });
+        settings.bind('answers-language', languageRow, 'text', Gio.SettingsBindFlags.DEFAULT);
+        settings.bind('answers-enabled', languageRow, 'sensitive', Gio.SettingsBindFlags.GET);
+        answers.add(languageRow);
+        page.add(answers);
+
         const behaviour = new Adw.PreferencesGroup({title: 'Behaviour'});
         const panelRow = new Adw.SwitchRow({
             title: 'Top bar icon',

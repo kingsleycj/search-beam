@@ -1,11 +1,11 @@
 {
   "uuid": "search-beam@kingsleycj.github.io",
   "name": "Search Beam",
-  "description": "A Spotlight-style search popup: GNOME's own search (apps, files, settings, calculator, web), pulled out of the Overview and opened with a shortcut. A GNOME 50 replacement for Search Light.",
+  "description": "A Spotlight-style search popup: GNOME's own search (apps, files, settings, calculator, web), pulled out of the Overview and opened with a shortcut.\n\nOptional online answers (off by default): dictionary definitions from Wiktionary and summaries from Wikipedia, shown and readable inside the popup. When turned on, what you type is sent to Wikimedia after you pause typing. The reader's Copy button puts the entry's text on the clipboard.",
   "shell-version": [
     "50"
   ],
   "settings-schema": "org.gnome.shell.extensions.search-beam",
-  "version-name": "1.0",
+  "version-name": "1.1",
   "url": "https://github.com/kingsleycj/search-beam"
 }

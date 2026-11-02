@@ -16,6 +16,9 @@ import St from 'gi://St';
 import * as Main from 'resource:///org/gnome/shell/ui/main.js';
 import * as Background from 'resource:///org/gnome/shell/ui/background.js';
 
+import {AnswerService, planLookup} from './answers.js';
+import {AnswerCard, AnswerReader} from './answerView.js';
+
 // Base size in logical pixels; scale-width/scale-height add a fraction of half
 // the monitor on top. At 100% display scaling this matches Search Light's
 // formula, so imported values give the same size.
@@ -28,6 +31,10 @@ const STYLE_KEYS = [
     'border-radius', 'font-size', 'entry-font-size',
 ];
 const LAYOUT_KEYS = ['scale-width', 'scale-height'];
+const ANSWER_KEYS = ['answers-enabled', 'answers-language'];
+
+// Wait for a pause in typing before looking anything up online.
+const LOOKUP_DELAY_MS = 400;
 const BLUR_KEYS = ['blur-background', 'blur-sigma', 'blur-brightness'];
 
 const MASK_DECLARATIONS = `
@@ -136,18 +143,27 @@ export class SearchBeamPopup {
         });
         this.actor.add_child(this._box);
 
-        // Escape closes the popup from anywhere inside it. Capture phase, so it
-        // runs before the search entry's own Escape handling, except while an
-        // input method is composing (Escape then cancels the composition).
-        this.actor.connect('captured-event', (actor, event) => {
-            if (event.type() === Clutter.EventType.KEY_PRESS &&
-                event.get_key_symbol() === Clutter.KEY_Escape &&
-                !this._entry?.clutter_text.has_preedit()) {
-                this.hide();
-                return Clutter.EVENT_STOP;
-            }
-            return Clutter.EVENT_PROPAGATE;
-        });
+        // Online answers: the card sits between the search box and the
+        // results, the reader replaces the results while open. The borrowed
+        // entry and results are slotted around them in _acquire().
+        this._answers = new AnswerService();
+        this._lookupId = 0;
+        this._holdSearch = false;
+        this._card = new AnswerCard();
+        this._card.connect('activate', () => this._openReader());
+        this._box.add_child(this._card);
+        this._reader = new AnswerReader();
+        this._reader.connect('back', () => this._closeReader());
+        this._reader.connect('open-url', (reader, url) => this._openUrl(url));
+        this._reader.connect('copy', (reader, text) =>
+            St.Clipboard.get_default().set_text(St.ClipboardType.CLIPBOARD, text));
+        this._box.add_child(this._reader);
+
+        // Keys handled in the capture phase, before the search entry sees
+        // them. Escape closes the reader, or else the popup (except while an
+        // input method is composing: Escape then cancels the composition).
+        this.actor.connect('captured-event', (actor, event) =>
+            this._onCapturedKey(event));
         this.actor.connect('key-press-event', (actor, event) =>
             this._onKeyPress(event));
 
@@ -179,6 +195,9 @@ export class SearchBeamPopup {
             GLib.source_remove(this._restoreFocusId);
             this._restoreFocusId = 0;
         }
+        this._resetAnswers();
+        this._answers.destroy();
+        this._answers = null;
 
         this._settings.disconnectObject(this);
         Main.overview.disconnectObject(this);
@@ -289,6 +308,7 @@ export class SearchBeamPopup {
             GLib.source_remove(this._relayoutId);
             this._relayoutId = 0;
         }
+        this._resetAnswers();
 
         // Stop typing into a popup that's fading out.
         const focus = global.stage.get_key_focus();
@@ -373,12 +393,15 @@ export class SearchBeamPopup {
 
         this._detach(entry);
         this._detach(controller);
-        this._box.add_child(entry);
-        this._box.add_child(controller);
+        // Order in the box: search entry, answer card, results, reader.
+        this._box.insert_child_at_index(entry, 0);
+        this._box.insert_child_above(controller, this._card);
         entry.add_style_class_name('search-beam-entry');
 
         controller.connectObject('notify::search-active',
             () => this._onSearchActiveChanged(), this);
+        entry.clutter_text.connectObject('text-changed',
+            () => this._onQueryChanged(), this);
 
         const overview = Main.overview;
         const closeOrCall = original => (...args) => {
@@ -399,6 +422,8 @@ export class SearchBeamPopup {
             // whitespace-only search, on clicks around an empty search box and
             // when the controller is unmapped. Only clear the text.
             override(controller, 'reset', () => {
+                if (this._holdSearch)
+                    return;
                 entry.text = '';
                 entry.clutter_text.set_cursor_visible(true);
                 entry.clutter_text.set_selection(0, 0);
@@ -433,7 +458,9 @@ export class SearchBeamPopup {
         const controller = this._controller;
 
         controller.disconnectObject(this);
+        entry.clutter_text.disconnectObject(this);
         entry.remove_style_class_name('search-beam-entry');
+        this._resetAnswers();
 
         // Taking the controller out clears the search text (via our reset
         // override, so key focus is left alone), so restore overrides after.
@@ -555,6 +582,151 @@ export class SearchBeamPopup {
             return Clutter.EVENT_STOP;
         }
         return Clutter.EVENT_PROPAGATE;
+    }
+
+    // --- online answers -------------------------------------------------
+
+    _onCapturedKey(event) {
+        if (event.type() !== Clutter.EventType.KEY_PRESS || !this._acquired)
+            return Clutter.EVENT_PROPAGATE;
+        const symbol = event.get_key_symbol();
+
+        if (symbol === Clutter.KEY_Escape) {
+            if (this._entry.clutter_text.has_preedit())
+                return Clutter.EVENT_PROPAGATE;
+            if (this._reader.visible)
+                this._closeReader();
+            else
+                this.hide();
+            return Clutter.EVENT_STOP;
+        }
+
+        const isEnter = symbol === Clutter.KEY_Return || symbol === Clutter.KEY_KP_Enter;
+        const ctrl = (event.get_state() & Clutter.ModifierType.CONTROL_MASK) !== 0;
+        if (isEnter && ctrl && this._card.visible) {
+            this._openReader();
+            return Clutter.EVENT_STOP;
+        }
+
+        if (this._reader.visible) {
+            if (this._reader.scroll(symbol))
+                return Clutter.EVENT_STOP;
+            // The results are hidden behind the reader: don't let Enter,
+            // Tab or arrows reach them (typing still edits the search and
+            // closes the reader).
+            if (isEnter || [Clutter.KEY_Tab, Clutter.KEY_ISO_Left_Tab,
+                Clutter.KEY_Left, Clutter.KEY_Right].includes(symbol))
+                return Clutter.EVENT_STOP;
+        }
+        return Clutter.EVENT_PROPAGATE;
+    }
+
+    _onQueryChanged() {
+        this._resetAnswers();
+        if (!this._settings.get_boolean('answers-enabled'))
+            return;
+
+        const query = this._entry.get_text();
+        if (!planLookup(query))
+            return;
+
+        this._lookupId = GLib.timeout_add(GLib.PRIORITY_DEFAULT, LOOKUP_DELAY_MS, () => {
+            this._lookupId = 0;
+            this._lookup(query).catch(() => {
+                // Offline, rate-limited or superseded by newer typing: the
+                // card simply doesn't appear.
+            });
+            return GLib.SOURCE_REMOVE;
+        });
+    }
+
+    async _lookup(query) {
+        const answer = await this._answers.lookup(query,
+            this._settings.get_string('answers-language'));
+        if (!answer || !this._isCurrentQuery(query))
+            return;
+
+        this._card.setAnswer(answer);
+        this._card.show();
+        // GNOME prints "No results" when no app or file matches; with an
+        // answer on screen that's wrong, so the stylesheet hides it.
+        this._box.add_style_class_name('search-beam-has-answer');
+
+        if (answer.thumbnail) {
+            const bytes = await this._answers.fetchImage(answer.thumbnail);
+            if (bytes && this._isCurrentQuery(query) && this._card.answer === answer)
+                this._card.setThumbnail(Gio.BytesIcon.new(bytes));
+        }
+    }
+
+    _isCurrentQuery(query) {
+        return this._visible && this._acquired && this._entry.get_text() === query;
+    }
+
+    _resetAnswers() {
+        if (this._lookupId) {
+            GLib.source_remove(this._lookupId);
+            this._lookupId = 0;
+        }
+        this._answers?.cancelPending();
+        this._closeReader();
+        this._card.hide();
+        this._card.answer = null;
+        this._box.remove_style_class_name('search-beam-has-answer');
+    }
+
+    _openReader() {
+        const answer = this._card.answer;
+        if (!answer || this._reader.visible)
+            return;
+
+        this._card.hide();
+        // Hiding the results unmaps GNOME's search controller, which resets
+        // (clears) the search; keep the text while the reader covers them.
+        this._holdSearch = true;
+        this._controller.hide();
+        this._holdSearch = false;
+        this._reader.showAnswer(answer);
+        this._reader.show();
+
+        if (answer.kind !== 'wikipedia')
+            return;
+        const stillShowing = () => this._visible && this._reader.visible &&
+            this._reader.answer === answer;
+        this._answers.fetchArticle(answer.title, answer.lang).then(article => {
+            if (!stillShowing())
+                return;
+            if (article)
+                this._reader.showArticle(article);
+            else
+                this._reader.showArticleError();
+        }).catch(e => {
+            if (!e.matches?.(Gio.IOErrorEnum, Gio.IOErrorEnum.CANCELLED) && stillShowing())
+                this._reader.showArticleError();
+        });
+    }
+
+    _closeReader() {
+        if (!this._reader.visible)
+            return;
+        this._reader.hide();
+        if (this._card.answer)
+            this._card.show();
+        if (this._controller?.searchActive)
+            this._controller.show();
+    }
+
+    _openUrl(url) {
+        if (!url.startsWith('https://'))
+            return;
+        try {
+            Gio.AppInfo.launch_default_for_uri(url,
+                global.create_app_launch_context(0, -1));
+        } catch (e) {
+            console.error(`Search Beam: could not open ${url}: ${e.message}`);
+            return;
+        }
+        this.hide({restoreFocus: false});
     }
 
     // --- geometry -------------------------------------------------------
@@ -704,6 +876,8 @@ export class SearchBeamPopup {
             this._syncBlur();
         if ((STYLE_KEYS.includes(key) || LAYOUT_KEYS.includes(key)) && this._visible)
             this._layout();
+        if (ANSWER_KEYS.includes(key) && this._acquired)
+            this._onQueryChanged();
     }
 
     _color(key) {

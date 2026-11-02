@@ -5,7 +5,7 @@ ZIP  := build/$(UUID).shell-extension.zip
 
 pack:
 	mkdir -p build
-	gnome-extensions pack --force --extra-source=popup.js --extra-source=LICENSE --out-dir=build .
+	gnome-extensions pack --force --extra-source=popup.js --extra-source=answers.js --extra-source=answerView.js --extra-source=LICENSE --out-dir=build .
 
 install: pack
 	gnome-extensions install --force $(ZIP)
