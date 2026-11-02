@@ -43,9 +43,9 @@ export default class Helper extends Extension {
             canLaunchSearch: false,
             appInfo: Gio.DesktopAppInfo.new('org.gnome.Nautilus.desktop'),
             getInitialResultSet: async terms =>
-                terms.some(t => t.startsWith('beamtest')) ? uris : [],
+                terms.some(t => t.startsWith('beamtest') || t === 'serendipity') ? uris : [],
             getSubsearchResultSet: async (previous, terms) =>
-                terms.some(t => t.startsWith('beamtest')) ? uris : [],
+                terms.some(t => t.startsWith('beamtest') || t === 'serendipity') ? uris : [],
             getResultMetas: async ids => ids.map(id => {
                 const file = Gio.File.new_for_uri(id);
                 return {
@@ -153,7 +153,15 @@ export default class Helper extends Extension {
                             previewType: preview?.info?.typeLabel ?? null,
                             previewSnippet: preview?.info?.snippet ?? null,
                             previewDetailKeys: (preview?.info?.details ?? []).map(d => d[0]).join(','),
-                            previewImage: !!preview?.info?.image,
+                            previewImage: !!preview?.imageShown,
+                            boxPreviewing: !!findByName(a, 'searchBeamBox')?.has_style_class_name('search-beam-previewing'),
+                            focusOnResult: (() => {
+                                for (let f = global.stage.key_focus; f; f = f.get_parent()) {
+                                    if (f.app || f.metaInfo)
+                                        return true;
+                                }
+                                return false;
+                            })(),
                         };
                     })(),
                     toggleOwn: Object.prototype.hasOwnProperty.call(Main.overview, 'toggle') || Object.prototype.hasOwnProperty.call(Main.overview, 'hide'),

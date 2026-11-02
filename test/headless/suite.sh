@@ -178,6 +178,26 @@ ev 'sbTest.chord("Escape")' >/dev/null; sleep 0.6
 check "second Esc closes the popup" visible false
 
 open_popup
+ev 'sbTest.type("serendipity")' >/dev/null; waitfor cardVisible true 12
+ev 'sbTest.chord("Tab")' >/dev/null; sleep 0.6
+check "a result has keyboard focus" focusOnResult true
+ev 'sbTest.chord("Control_L", "Return")' >/dev/null; sleep 0.8
+check "Ctrl+Enter with a result focused opens the reader" readerVisible true
+check "…and keeps the popup open" visible true
+ev 'sbTest.chord("Escape")' >/dev/null; sleep 0.6
+ev 'sbTest.chord("Tab")' >/dev/null; sleep 0.6
+set -- $(field cardX) $(field cardY)
+ev "sbTest.click($1, $2)" >/dev/null; sleep 0.8
+check "clicking the card with a result focused opens the reader" readerVisible true
+check "…and keeps the popup open" visible true
+ev 'sbTest.chord("Escape")' >/dev/null; sleep 0.3; ev 'sbTest.chord("Escape")' >/dev/null; sleep 0.6
+
+open_popup
+ev 'sbTest.type("sett")' >/dev/null; sleep 3
+check "typing an app's name (sett → Settings): no card" cardVisible false
+ev 'sbTest.chord("Escape")' >/dev/null; sleep 0.6
+
+open_popup
 ev 'sbTest.type("Paris")' >/dev/null; waitfor cardVisible true 12
 check "name: Wikipedia card appears" cardSource '"Wikipedia"'
 check "name: right article" cardTitle '"Paris"'
@@ -238,10 +258,15 @@ ev "sbTest.move($1, $2)" >/dev/null; waitfor previewTitle '"beamtest-image.png"'
 check "pointing at a result previews it" previewTitle '"beamtest-image.png"'
 waitfor previewImage true 3
 check "image file shows the picture" previewImage true
+check "provider column folded while the panel shows" boxPreviewing true
 "$S/shot.sh" 15-preview-image >/dev/null
+set -- $(at 120 31)
+ev "sbTest.move($1, $2)" >/dev/null; waitfor previewTitle '"beamtest-notes.txt"' 3
+check "moving off the results previews the top result again" previewTitle '"beamtest-notes.txt"'
 for i in $(seq 8); do ev 'sbTest.chord("BackSpace")' >/dev/null; done
 ev 'sbTest.type("zqzqzq")' >/dev/null; sleep 1
 check "preview hides when nothing matches" previewVisible false
+check "provider column unfolded when the panel is hidden" boxPreviewing false
 ev 'sbTest.chord("Escape")' >/dev/null; sleep 0.6
 
 setting show-preview false

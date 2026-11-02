@@ -8,16 +8,20 @@ import GObject from 'gi://GObject';
 import Pango from 'gi://Pango';
 import St from 'gi://St';
 
-import {truncate} from './answers.js';
+import {capSenses, truncate} from './answers.js';
 
 const SUMMARY_CHARS = 240;
+// The reader lists at most this many senses per part of speech, and this
+// many examples per sense; the rest is a "Continue reading" link away.
+const READER_SENSES = 8;
+const READER_EXAMPLES = 2;
 
 const ATTRIBUTION = {
     Wikipedia: 'From Wikipedia, the free encyclopedia · CC BY-SA 4.0',
     Wiktionary: 'From Wiktionary, the free dictionary · CC BY-SA 4.0',
 };
 
-function wrappedLabel(styleClass, text = '') {
+export function wrappedLabel(styleClass, text = '') {
     const label = new St.Label({style_class: styleClass, text, x_expand: true});
     label.clutter_text.set({
         line_wrap: true,
@@ -174,7 +178,8 @@ export const AnswerReader = GObject.registerClass({
         if (answer.kind === 'dictionary') {
             const blocks = [];
             const lines = [answer.title];
-            for (const entry of answer.entries) {
+            const {entries, truncated} = capSenses(answer.entries, READER_SENSES, READER_EXAMPLES);
+            for (const entry of entries) {
                 blocks.push({type: 'heading', text: entry.partOfSpeech, level: 2});
                 lines.push('', entry.partOfSpeech);
                 entry.definitions.forEach((sense, i) => {
@@ -186,7 +191,7 @@ export const AnswerReader = GObject.registerClass({
                     }
                 });
             }
-            this._render(blocks, false);
+            this._render(blocks, truncated);
             this._copyText = lines.join('\n');
         } else {
             this._render([
@@ -210,8 +215,14 @@ export const AnswerReader = GObject.registerClass({
         ], true);
     }
 
-    // Keyboard scrolling while focus stays in the search box.
-    scroll(symbol) {
+    // Keyboard scrolling while focus stays in the search box: plain arrow
+    // and Page keys only, so Shift/Ctrl combinations and Home/End still edit
+    // the search text.
+    scroll(symbol, state) {
+        const modifiers = Clutter.ModifierType.SHIFT_MASK |
+            Clutter.ModifierType.CONTROL_MASK | Clutter.ModifierType.MOD1_MASK;
+        if (state & modifiers)
+            return false;
         const adj = this._scroll.vadjustment;
         const step = {
             [Clutter.KEY_Up]: -adj.step_increment,
@@ -219,14 +230,9 @@ export const AnswerReader = GObject.registerClass({
             [Clutter.KEY_Page_Up]: -adj.page_increment,
             [Clutter.KEY_Page_Down]: adj.page_increment,
         }[symbol];
-        if (step !== undefined)
-            adj.value = Math.max(adj.lower, Math.min(adj.value + step, adj.upper - adj.page_size));
-        else if (symbol === Clutter.KEY_Home)
-            adj.value = adj.lower;
-        else if (symbol === Clutter.KEY_End)
-            adj.value = adj.upper - adj.page_size;
-        else
+        if (step === undefined)
             return false;
+        adj.value = Math.max(adj.lower, Math.min(adj.value + step, adj.upper - adj.page_size));
         return true;
     }
 

@@ -3,6 +3,7 @@
 // Unit tests for the pure parts of answers.js (no network, no shell).
 // Run from the repo root:  gjs -m test/unit/answers.test.js
 
+import GLib from 'gi://GLib';
 import System from 'system';
 
 import * as A from '../../answers.js';
@@ -19,6 +20,11 @@ function test(name, fn) {
         failed++;
         print(`FAIL  ${name}: ${e.message}`);
     }
+}
+
+const asyncTests = [];
+function testAsync(name, fn) {
+    asyncTests.push([name, fn]);
 }
 
 function eq(actual, expected) {
@@ -72,6 +78,10 @@ test('htmlToText strips tags and decodes entities', () => {
 
 test('htmlToText decodes numeric entities and non-breaking spaces', () => {
     eq(A.htmlToText('a&#8212;b&#x2014;c&nbsp;d'), 'a—b—c d');
+});
+
+test('htmlToText leaves unknown entities alone, even Object property names', () => {
+    eq(A.htmlToText('a &constructor; b &toString; c &bogus;'), 'a &constructor; b &toString; c &bogus;');
 });
 
 test('htmlToText collapses whitespace', () => {
@@ -129,12 +139,40 @@ test('isCommonWord is false when every entry is a proper noun', () => {
     eq(A.isCommonWord([{partOfSpeech: 'Noun', definitions: [{text: 'x', examples: []}]}]), true);
 });
 
+test('isCommonWord is false for symbols and abbreviations only', () => {
+    eq(A.isCommonWord([{partOfSpeech: 'Symbol', definitions: [{text: 'ISO code', examples: []}]}]), false);
+    eq(A.isCommonWord([
+        {partOfSpeech: 'Proper noun', definitions: [{text: 'x', examples: []}]},
+        {partOfSpeech: 'Abbreviation', definitions: [{text: 'y', examples: []}]},
+    ]), false);
+});
+
+test('capSenses keeps the first senses and examples and reports what was cut', () => {
+    const entries = [
+        {partOfSpeech: 'Verb', definitions: [1, 2, 3, 4].map(n => ({text: `v${n}`, examples: ['a', 'b', 'c']}))},
+        {partOfSpeech: 'Noun', definitions: [{text: 'n1', examples: []}]},
+    ];
+    eq(A.capSenses(entries, 2, 1), {
+        entries: [
+            {partOfSpeech: 'Verb', definitions: [{text: 'v1', examples: ['a']}, {text: 'v2', examples: ['a']}]},
+            {partOfSpeech: 'Noun', definitions: [{text: 'n1', examples: []}]},
+        ],
+        truncated: true,
+    });
+    eq(A.capSenses(entries.slice(1), 2, 1).truncated, false);
+});
+
 // --- choosing a Wikipedia page --------------------------------------------
 
 test('pickExactTitle matches regardless of case and underscores', () => {
     const pages = [{key: 'New_York_City', title: 'New York City'}, {key: 'Paris', title: 'Paris'}];
     eq(A.pickExactTitle(pages, 'paris')?.key, 'Paris');
     eq(A.pickExactTitle(pages, 'new york city')?.key, 'New_York_City');
+});
+
+test('pickExactTitle follows redirects (matched_title)', () => {
+    const pages = [{key: 'New_York_City', title: 'New York City', matched_title: 'NYC'}];
+    eq(A.pickExactTitle(pages, 'NYC')?.key, 'New_York_City');
 });
 
 test('pickExactTitle ignores prefix-only matches', () => {
@@ -180,10 +218,12 @@ test('splitArticle stops at the character budget', () => {
 
 // --- small helpers --------------------------------------------------------
 
-test('normalizeLanguage accepts language codes only', () => {
+test('normalizeLanguage accepts Wikipedia subdomains only', () => {
     eq(A.normalizeLanguage('EN'), 'en');
-    eq(A.normalizeLanguage('pt-br'), 'pt-br');
+    eq(A.normalizeLanguage('simple'), 'simple');
+    eq(A.normalizeLanguage('zh-min-nan'), 'zh-min-nan');
     eq(A.normalizeLanguage('../evil'), 'en');
+    eq(A.normalizeLanguage('en.evil.com'), 'en');
     eq(A.normalizeLanguage(''), 'en');
 });
 
@@ -191,6 +231,81 @@ test('truncate cuts at a word boundary with an ellipsis', () => {
     eq(A.truncate('alpha beta gamma', 12), 'alpha beta…');
     eq(A.truncate('short', 12), 'short');
 });
+
+test('truncate never splits an emoji', () => {
+    eq(A.truncate('ab😀cd', 4), 'ab😀…');
+});
+
+// --- lookup error handling (network replaced by fixtures) ------------------
+
+class FakeService extends A.AnswerService {
+    constructor(routes) {
+        super();
+        this.routes = routes;
+    }
+
+    _getJson(url) {
+        const route = Object.keys(this.routes).find(prefix => url.startsWith(prefix));
+        const result = route ? this.routes[route] : null;
+        return result instanceof Error ? Promise.reject(result) : Promise.resolve(result);
+    }
+}
+
+const PARIS_SUMMARY = {
+    type: 'standard', title: 'Linux', description: 'Operating system family',
+    extract: 'Linux is a family of open-source operating systems.',
+    content_urls: {desktop: {page: 'https://en.wikipedia.org/wiki/Linux'}},
+};
+
+testAsync('a failing dictionary falls back to Wikipedia', async () => {
+    const service = new FakeService({
+        'https://en.wiktionary.org/': new A.HttpError(503),
+        'https://en.wikipedia.org/w/rest.php/v1/search/title': {pages: [{key: 'Linux', title: 'Linux'}]},
+        'https://en.wikipedia.org/api/rest_v1/page/summary/': PARIS_SUMMARY,
+    });
+    const answer = await service.lookup('linux', 'en');
+    service.destroy();
+    eq(answer?.kind, 'wikipedia');
+});
+
+testAsync('when every source fails the lookup rejects (and is not cached as "no answer")', async () => {
+    const service = new FakeService({
+        'https://en.wiktionary.org/': new A.HttpError(503),
+        'https://en.wikipedia.org/': new A.HttpError(429),
+    });
+    let rejected = false;
+    try {
+        await service.lookup('linux', 'en');
+    } catch {
+        rejected = true;
+    }
+    service.routes = {
+        'https://en.wiktionary.org/': null,
+        'https://en.wikipedia.org/w/rest.php/v1/search/title': {pages: [{key: 'Linux', title: 'Linux'}]},
+        'https://en.wikipedia.org/api/rest_v1/page/summary/': PARIS_SUMMARY,
+    };
+    const retry = await service.lookup('linux', 'en');
+    service.destroy();
+    eq(rejected, true);
+    eq(retry?.kind, 'wikipedia');
+});
+
+const loop = new GLib.MainLoop(null, false);
+(async () => {
+    for (const [name, fn] of asyncTests) {
+        try {
+            // eslint-disable-next-line no-await-in-loop
+            await fn();
+            passed++;
+            print(`PASS  ${name}`);
+        } catch (e) {
+            failed++;
+            print(`FAIL  ${name}: ${e.message}`);
+        }
+    }
+    loop.quit();
+})();
+loop.run();
 
 print(`\n${passed} passed, ${failed} failed`);
 if (failed)

@@ -15,6 +15,10 @@ import Soup from 'gi://Soup?version=3.0';
 const USER_AGENT = 'SearchBeam/1.1 (https://github.com/kingsleycj/search-beam)';
 const MIN_LENGTH = 3;
 const CACHE_SIZE = 100;
+const IMAGE_CACHE_SIZE = 30;
+const ARTICLE_CACHE_SIZE = 10;
+// The extract API can't cap long articles (exchars stops at 1,200), so the
+// whole extract is fetched and only this much is shown.
 const ARTICLE_CHARS = 12000;
 
 // Sections that are lists of links rather than reading material.
@@ -31,10 +35,37 @@ const STOP_WORDS = new Set([
 const ENTITIES = {amp: '&', lt: '<', gt: '>', quot: '"', apos: "'", nbsp: ' '};
 
 // Entry types that are rarely what someone looking up a word means; they go
-// after the real senses ("run" should lead with the verb, not a language code).
+// after the real senses ("run" should lead with the verb, not a language
+// code), and don't count as a dictionary word on their own.
 const MINOR_PARTS = new Set([
     'symbol', 'letter', 'abbreviation', 'initialism', 'acronym', 'prefix', 'suffix',
 ]);
+
+// A non-2xx answer other than 404 (rate limiting, server errors).
+export class HttpError extends Error {
+    constructor(status) {
+        super(`HTTP ${status}`);
+        this.name = 'HttpError';
+        this.status = status;
+    }
+}
+
+// Errors that just mean "no answer right now": offline, timed out, rate
+// limited, cancelled. Anything else is a bug worth logging.
+export function isExpectedError(error) {
+    return error instanceof HttpError || error instanceof GLib.Error;
+}
+
+function remember(cache, key, value, limit) {
+    cache.delete(key);
+    cache.set(key, value);
+    if (cache.size > limit)
+        cache.delete(cache.keys().next().value);
+}
+
+function isCancelled(error) {
+    return error?.matches?.(Gio.IOErrorEnum, Gio.IOErrorEnum.CANCELLED) ?? false;
+}
 
 // --- pure helpers -----------------------------------------------------------
 
@@ -72,7 +103,8 @@ export function htmlToText(html) {
                     : parseInt(entity.slice(1), 10);
                 return code > 0 && code <= 0x10ffff ? String.fromCodePoint(code) : match;
             }
-            return ENTITIES[entity.toLowerCase()] ?? match;
+            const name = entity.toLowerCase();
+            return Object.hasOwn(ENTITIES, name) ? ENTITIES[name] : match;
         })
         .replace(/\s+/g, ' ')
         .trim();
@@ -105,16 +137,41 @@ export function parseDefinitions(json) {
 }
 
 export function isCommonWord(entries) {
-    return entries.some(e => e.partOfSpeech.toLowerCase() !== 'proper noun');
+    return entries.some(e => {
+        const part = e.partOfSpeech.toLowerCase();
+        return part !== 'proper noun' && !MINOR_PARTS.has(part);
+    });
+}
+
+// The reader shows at most `senses` senses per part of speech and `examples`
+// examples per sense ("run" has well over a hundred senses on Wiktionary).
+export function capSenses(entries, senses, examples) {
+    let truncated = false;
+    const capped = entries.map(entry => {
+        if (entry.definitions.length > senses)
+            truncated = true;
+        return {
+            partOfSpeech: entry.partOfSpeech,
+            definitions: entry.definitions.slice(0, senses).map(sense => {
+                if (sense.examples.length > examples)
+                    truncated = true;
+                return {text: sense.text, examples: sense.examples.slice(0, examples)};
+            }),
+        };
+    });
+    return {entries: capped, truncated};
 }
 
 function normalizeTitle(title) {
     return title.replace(/_/g, ' ').trim().toLowerCase();
 }
 
+// Matches the article title, or the redirect the search went through
+// (matched_title: "NYC" for "New York City").
 export function pickExactTitle(pages, term) {
     const wanted = normalizeTitle(term);
-    return pages.find(p => normalizeTitle(p.title ?? p.key ?? '') === wanted) ?? null;
+    return pages.find(p =>
+        [p.title, p.key, p.matched_title].some(t => t && normalizeTitle(t) === wanted)) ?? null;
 }
 
 function significantWords(text) {
@@ -182,15 +239,19 @@ export function splitArticle(text, maxChars) {
     return {blocks: cleaned, truncated};
 }
 
+// A Wikipedia subdomain: en, de, simple, zh-min-nan… (letters and hyphens
+// only, so it can't change the host it's put into).
 export function normalizeLanguage(code) {
     const c = (code ?? '').trim().toLowerCase();
-    return /^[a-z]{2,3}(-[a-z]{2,8})?$/.test(c) ? c : 'en';
+    return /^[a-z]{2,12}(-[a-z]{2,10}){0,2}$/.test(c) ? c : 'en';
 }
 
+// Counts characters, not UTF-16 units, so an emoji is never cut in half.
 export function truncate(text, max) {
-    if (text.length <= max)
+    const chars = Array.from(text);
+    if (chars.length <= max)
         return text;
-    let cut = text.slice(0, max - 1);
+    let cut = chars.slice(0, max - 1).join('');
     const space = cut.lastIndexOf(' ');
     if (space > max / 2)
         cut = cut.slice(0, space);
@@ -203,6 +264,8 @@ export class AnswerService {
     constructor() {
         this._session = new Soup.Session({user_agent: USER_AGENT, timeout: 8});
         this._cache = new Map();
+        this._imageCache = new Map();
+        this._articleCache = new Map();
         this._cancellable = new Gio.Cancellable();
     }
 
@@ -211,6 +274,8 @@ export class AnswerService {
         this._session.abort();
         this._session = null;
         this._cache.clear();
+        this._imageCache.clear();
+        this._articleCache.clear();
     }
 
     // Abandon any lookups still in flight (the query changed).
@@ -219,60 +284,89 @@ export class AnswerService {
         this._cancellable = new Gio.Cancellable();
     }
 
-    // Resolves to an answer object, or null when nothing fits. Rejects on
-    // network errors and cancellation; those results are not cached.
+    // Identifies what a query would look up: two queries with the same key
+    // ("Paris" and "Paris ") give the same answer. Null if no lookup.
+    lookupKey(query, language) {
+        const plan = planLookup(query);
+        return plan ? `${normalizeLanguage(language)}|${plan.steps.join(',')}|${plan.term}` : null;
+    }
+
+    // Resolves to an answer object, or null when nothing fits. If a source
+    // fails (offline, rate limited), the next one is still tried; only when
+    // no source answered and one of them failed does it reject, and then
+    // nothing is cached. Cancellation rejects straight away.
     async lookup(query, language) {
         const plan = planLookup(query);
         if (!plan)
             return null;
 
         const lang = normalizeLanguage(language);
-        const key = `${lang}|${plan.steps.join(',')}|${plan.term}`;
-        if (this._cache.has(key))
-            return this._cache.get(key);
+        const key = this.lookupKey(query, language);
+        if (this._cache.has(key)) {
+            const cached = this._cache.get(key);
+            remember(this._cache, key, cached, CACHE_SIZE);
+            return cached;
+        }
 
         const cancellable = this._cancellable;
-        // When the dictionary is only the first guess, a proper-noun-only
-        // entry ("paris") should fall through to Wikipedia.
+        // When the dictionary is only the first guess, a proper-noun- or
+        // symbol-only entry ("paris", "deu") should fall through to Wikipedia.
         const commonOnly = plan.steps[0] === 'dictionary' && plan.steps.length > 1;
         let answer = null;
+        let failure = null;
         for (const step of plan.steps) {
-            if (step === 'dictionary')
-                // eslint-disable-next-line no-await-in-loop
-                answer = await this._dictionary(plan.term, lang, commonOnly, cancellable);
-            else if (step === 'wikipedia-title')
-                // eslint-disable-next-line no-await-in-loop
-                answer = await this._wikipediaTitle(plan.term, lang, cancellable);
-            else
-                // eslint-disable-next-line no-await-in-loop
-                answer = await this._wikipediaSearch(plan.term, lang, cancellable);
+            try {
+                if (step === 'dictionary')
+                    // eslint-disable-next-line no-await-in-loop
+                    answer = await this._dictionary(plan.term, lang, commonOnly, cancellable);
+                else if (step === 'wikipedia-title')
+                    // eslint-disable-next-line no-await-in-loop
+                    answer = await this._wikipediaTitle(plan.term, lang, cancellable);
+                else
+                    // eslint-disable-next-line no-await-in-loop
+                    answer = await this._wikipediaSearch(plan.term, lang, cancellable);
+            } catch (e) {
+                if (isCancelled(e))
+                    throw e;
+                failure ??= e;
+                continue;
+            }
             if (answer)
                 break;
         }
 
-        this._cache.delete(key);
-        this._cache.set(key, answer);
-        if (this._cache.size > CACHE_SIZE)
-            this._cache.delete(this._cache.keys().next().value);
+        if (!answer && failure)
+            throw failure;
+        remember(this._cache, key, answer, CACHE_SIZE);
         return answer;
     }
 
     // The full article as reading blocks, for the "read more" view.
     async fetchArticle(title, language) {
         const lang = normalizeLanguage(language);
+        const key = `${lang}|${title}`;
+        if (this._articleCache.has(key))
+            return this._articleCache.get(key);
+
         const url = `https://${lang}.wikipedia.org/w/api.php?action=query&prop=extracts` +
             `&explaintext=1&exsectionformat=wiki&redirects=1&format=json&formatversion=2` +
             `&titles=${encodeURIComponent(title)}`;
         const json = await this._getJson(url, this._cancellable);
         const extract = json?.query?.pages?.[0]?.extract;
-        return extract ? splitArticle(extract, ARTICLE_CHARS) : null;
+        const article = extract ? splitArticle(extract, ARTICLE_CHARS) : null;
+        remember(this._articleCache, key, article, ARTICLE_CACHE_SIZE);
+        return article;
     }
 
     async fetchImage(url) {
         if (!url?.startsWith('https://'))
             return null;
+        if (this._imageCache.has(url))
+            return this._imageCache.get(url);
         const {status, bytes} = await this._get(url, this._cancellable);
-        return status === Soup.Status.OK ? bytes : null;
+        const image = status === Soup.Status.OK ? bytes : null;
+        remember(this._imageCache, url, image, IMAGE_CACHE_SIZE);
+        return image;
     }
 
     async _dictionary(term, lang, commonOnly, cancellable) {
@@ -282,17 +376,28 @@ export class AnswerService {
 
         let entries = null;
         let word = term;
+        let failure = null;
         for (const candidate of new Set([term, term.toLowerCase()])) {
-            // eslint-disable-next-line no-await-in-loop
-            const json = await this._getJson(
-                `https://en.wiktionary.org/api/rest_v1/page/definition/${encodeURIComponent(candidate)}`,
-                cancellable);
+            let json;
+            try {
+                // eslint-disable-next-line no-await-in-loop
+                json = await this._getJson(
+                    `https://en.wiktionary.org/api/rest_v1/page/definition/${encodeURIComponent(candidate)}`,
+                    cancellable);
+            } catch (e) {
+                if (isCancelled(e))
+                    throw e;
+                failure ??= e;
+                continue;
+            }
             entries = json ? parseDefinitions(json) : null;
             if (entries) {
                 word = candidate;
                 break;
             }
         }
+        if (!entries && failure)
+            throw failure;
         if (!entries || (commonOnly && !isCommonWord(entries)))
             return null;
 
@@ -348,7 +453,7 @@ export class AnswerService {
         if (status === Soup.Status.NOT_FOUND)
             return null;
         if (status !== Soup.Status.OK)
-            throw new Error(`HTTP ${status}`);
+            throw new HttpError(status);
         return JSON.parse(new TextDecoder().decode(bytes.get_data()));
     }
 

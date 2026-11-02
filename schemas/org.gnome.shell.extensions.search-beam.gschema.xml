@@ -94,7 +94,7 @@
     <key name="answers-language" type="s">
       <default>'en'</default>
       <summary>Wikipedia language code</summary>
-      <description>Which Wikipedia to use, e.g. en, fr, de, pt-br. Definitions are English only.</description>
+      <description>Which Wikipedia to use, e.g. en, fr, de, pt, or simple for Simple English. Definitions are English only.</description>
     </key>
 
     <!-- Preview -->

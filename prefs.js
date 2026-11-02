@@ -79,7 +79,7 @@ export default class SearchBeamPreferences extends ExtensionPreferences {
         settings.bind('answers-enabled', answersRow, 'active', Gio.SettingsBindFlags.DEFAULT);
         answers.add(answersRow);
         const languageRow = new Adw.EntryRow({
-            title: 'Wikipedia language code (en, fr, de, pt-br…)',
+            title: 'Wikipedia language code (en, fr, de, pt, simple…)',
         });
         settings.bind('answers-language', languageRow, 'text', Gio.SettingsBindFlags.DEFAULT);
         settings.bind('answers-enabled', languageRow, 'sensitive', Gio.SettingsBindFlags.GET);

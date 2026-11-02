@@ -3,6 +3,7 @@
 // Unit tests for previewInfo.js (file details for the preview panel).
 // Run from the repo root:  gjs -m test/unit/preview.test.js
 
+import GdkPixbuf from 'gi://GdkPixbuf';
 import GLib from 'gi://GLib';
 import Gio from 'gi://Gio';
 import System from 'system';
@@ -54,6 +55,27 @@ test('snippetFrom keeps the first lines, trimmed', () => {
 
 test('snippetFrom shortens long lines', () => {
     eq(P.snippetFrom('abcdefghij', 5, 6), 'abcde…');
+});
+
+test('snippetFrom never splits an emoji', () => {
+    eq(P.snippetFrom('ab😀cd', 5, 4), 'ab😀…');
+});
+
+test('loadScaledImage returns a small PNG no bigger than asked', async () => {
+    const path = GLib.build_filenamev([dir, 'big.png']);
+    const pixbuf = GdkPixbuf.Pixbuf.new(GdkPixbuf.Colorspace.RGB, false, 8, 800, 400);
+    pixbuf.fill(0x336699ff);
+    pixbuf.savev(path, 'png', [], []);
+    const bytes = await P.loadScaledImage(path, 100, null);
+    const loader = GdkPixbuf.PixbufLoader.new();
+    loader.write_bytes(bytes);
+    loader.close();
+    const out = loader.get_pixbuf();
+    eq([out.get_width(), out.get_height()], [100, 50]);
+});
+
+test('loadScaledImage resolves to null for files it cannot decode', async () => {
+    eq(await P.loadScaledImage(GLib.build_filenamev([dir, 'blob.bin']), 100, null), null);
 });
 
 test('snippetFrom rejects binary content', () => {

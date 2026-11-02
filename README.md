@@ -107,7 +107,7 @@ gnome-extensions prefs search-beam@kingsleycj.github.io
 | Monitor | Which monitor to open on |
 | Follow the mouse | Open on the monitor under the pointer instead |
 | Look up answers online | Show Wiktionary definitions and Wikipedia summaries in the popup (off by default) |
-| Wikipedia language code | Which Wikipedia to use: `en`, `fr`, `de`, `pt-br`… (definitions are English only) |
+| Wikipedia language code | Which Wikipedia to use: `en`, `fr`, `de`, `pt`, `simple` (Simple English)… (definitions are English only) |
 | Preview panel | Show details of the selected result beside the list (needs a popup at least 640 px wide) |
 | Top bar icon | Show a search button in the top bar |
 | Animations / Animation length | Fade-and-zoom when opening and closing |
@@ -138,8 +138,9 @@ Answers are **off by default**. Turn them on under **Settings → General →
 Answers**. When they're on:
 
 - A lookup only happens after you pause typing, and only for real words,
-  names or phrases. App-name fragments ("firef") and sums ("5 km in miles",
-  which GNOME's Calculator already answers) are skipped.
+  names or phrases. Sums ("5 km in miles", which GNOME's Calculator already
+  answers) are skipped, and no card appears while the top result is an app
+  you're typing the name of ("fire" for Firefox, "sett" for Settings).
 - What you typed is sent to Wikimedia (en.wiktionary.org, and the Wikipedia
   you chose). Nothing is sent anywhere else, and nothing is stored on disk;
   recent answers are kept in memory until you log out.
@@ -246,7 +247,7 @@ make install   # install it for your user (then log out and back in)
 ### Testing without logging out
 
 `test/headless/` starts a separate, headless GNOME Shell with its own settings,
-loads Search Beam in it, and runs about 80 checks: opening and closing,
+loads Search Beam in it, and runs about 90 checks: opening and closing,
 clearing the search, focus returning to the previous window, launching
 results, Activities search still working, staying clear of the top bar, blur,
 disabling while open, the settings window, the top-bar button, the preview

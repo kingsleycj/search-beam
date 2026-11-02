@@ -4,6 +4,7 @@
 // thumbnail and a text snippet. Local files only; nothing leaves the machine.
 // No GNOME Shell imports, so it can be unit-tested with plain gjs.
 
+import GdkPixbuf from 'gi://GdkPixbuf';
 import Gio from 'gi://Gio';
 import GLib from 'gi://GLib';
 
@@ -38,7 +39,10 @@ export function snippetFrom(text, maxLines, maxLineChars) {
             continue;
         }
         blank = false;
-        lines.push(line.length > maxLineChars ? `${line.slice(0, maxLineChars - 1)}…` : line);
+        const chars = Array.from(line);
+        lines.push(chars.length > maxLineChars
+            ? `${chars.slice(0, maxLineChars - 1).join('')}…`
+            : line);
         if (++count >= maxLines)
             break;
     }
@@ -152,4 +156,41 @@ export async function describeFile(uri, cancellable) {
         details,
         snippet,
     };
+}
+
+// Decode an image scaled down to fit size×size and re-encode it as a small
+// PNG. The panel shows it from memory (Gio.BytesIcon) rather than by path:
+// St caches path-based icons for the whole session, which would keep every
+// photo ever previewed in gnome-shell's memory. Resolves to null if the
+// format can't be decoded.
+export async function loadScaledImage(path, size, cancellable) {
+    const file = Gio.File.new_for_path(path);
+    try {
+        const stream = await new Promise((resolve, reject) => {
+            file.read_async(GLib.PRIORITY_DEFAULT, cancellable, (f, result) => {
+                try {
+                    resolve(f.read_finish(result));
+                } catch (e) {
+                    reject(e);
+                }
+            });
+        });
+        const pixbuf = await new Promise((resolve, reject) => {
+            GdkPixbuf.Pixbuf.new_from_stream_at_scale_async(stream, size, size, true,
+                cancellable, (s, result) => {
+                    try {
+                        resolve(GdkPixbuf.Pixbuf.new_from_stream_finish(result));
+                    } catch (e) {
+                        reject(e);
+                    }
+                });
+        });
+        stream.close(null);
+        const [ok, buffer] = pixbuf.save_to_bufferv('png', [], []);
+        return ok ? new GLib.Bytes(buffer) : null;
+    } catch (e) {
+        if (e.matches?.(Gio.IOErrorEnum, Gio.IOErrorEnum.CANCELLED))
+            throw e;
+        return null;
+    }
 }

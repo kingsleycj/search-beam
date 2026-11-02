@@ -15,6 +15,7 @@ Image.open(src).crop((x, y, x + w, y + h)).save(dst, optimize=True)
 PY
 }
 
+trap 'setting answers-enabled false 2>/dev/null; setting animation-speed 100.0 2>/dev/null' EXIT
 for i in $(seq 60); do [ -s $S/bus ] && timeout 3 "$S/ev.sh" 'globalThis.sbTest ? "ready" : "no"' 2>/dev/null | grep -q ready && break; sleep 1; done
 sleep 2
 setting animation-speed 0.0

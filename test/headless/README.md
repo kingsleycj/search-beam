@@ -8,7 +8,7 @@ and the top-bar button.
 ```sh
 make pack                      # from the repo root
 test/headless/run.sh &         # start the isolated shell
-test/headless/suite.sh         # 49 checks; screenshots land in shots/
+test/headless/suite.sh         # ~90 checks; screenshots land in shots/
 ```
 
 Use a fresh shell for each suite run (the checks assume the settings `run.sh`

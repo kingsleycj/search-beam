@@ -5,23 +5,13 @@
 // files, the first lines.
 
 import Clutter from 'gi://Clutter';
-import Gio from 'gi://Gio';
 import GObject from 'gi://GObject';
-import Pango from 'gi://Pango';
 import St from 'gi://St';
 
-const ICON_SIZE = 96;
-const IMAGE_SIZE = 180;
+import {wrappedLabel} from './answerView.js';
 
-function wrappedLabel(styleClass) {
-    const label = new St.Label({style_class: styleClass, x_expand: true});
-    label.clutter_text.set({
-        line_wrap: true,
-        line_wrap_mode: Pango.WrapMode.WORD_CHAR,
-        ellipsize: Pango.EllipsizeMode.NONE,
-    });
-    return label;
-}
+const ICON_SIZE = 96;
+export const PREVIEW_IMAGE_SIZE = 180;
 
 export const PreviewPane = GObject.registerClass(
 class SearchBeamPreviewPane extends St.BoxLayout {
@@ -100,14 +90,21 @@ class SearchBeamPreviewPane extends St.BoxLayout {
         this._snippet.visible = this._snippet.text !== '';
     }
 
+    // The decoded picture (a Gio.BytesIcon from loadScaledImage) replaces
+    // the file-type icon once it's ready.
+    setImage(gicon) {
+        this._iconBin.child?.destroy();
+        this._iconBin.child = new St.Icon({
+            style_class: 'search-beam-preview-image',
+            gicon,
+            fallback_gicon: this.info?.icon ?? null,
+            icon_size: PREVIEW_IMAGE_SIZE,
+        });
+        this.imageShown = true;
+    }
+
     _makeIcon(info) {
-        if (info.image) {
-            return new St.Icon({
-                style_class: 'search-beam-preview-image',
-                gicon: Gio.FileIcon.new(Gio.File.new_for_path(info.image)),
-                icon_size: IMAGE_SIZE,
-            });
-        }
+        this.imageShown = false;
         const actor = info.createIcon?.(ICON_SIZE);
         if (actor)
             return actor;
