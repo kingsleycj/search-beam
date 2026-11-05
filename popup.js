@@ -112,9 +112,8 @@ function restoreOverrides(records) {
 }
 
 export class SearchBeamPopup {
-    constructor(settings, stylesheetPath) {
+    constructor(settings) {
         this._settings = settings;
-        this._stylesheetPath = stylesheetPath;
 
         this._visible = false; // open, or opening
         this._acquired = false; // holding the Overview's entry and results
@@ -206,8 +205,7 @@ export class SearchBeamPopup {
             this._onSettingChanged(key), this);
 
         // The Overview is about to use its search box: give it back now, even
-        // if we're open or still fading out. (Theme reloads need no handling:
-        // Main.loadTheme() carries custom stylesheets over to the new theme.)
+        // if we're open or still fading out.
         Main.overview.connectObject('showing', () => {
             this.hide({animate: false, restoreFocus: false});
             this._finishHide();
@@ -224,23 +222,24 @@ export class SearchBeamPopup {
             GLib.source_remove(this._restoreFocusId);
             this._restoreFocusId = 0;
         }
+        if (this._relayoutId) {
+            GLib.source_remove(this._relayoutId);
+            this._relayoutId = 0;
+        }
+        if (this._lookupId) {
+            GLib.source_remove(this._lookupId);
+            this._lookupId = 0;
+        }
+        if (this._previewPollId) {
+            GLib.source_remove(this._previewPollId);
+            this._previewPollId = 0;
+        }
         this._resetAnswers();
         this._answers.destroy();
         this._answers = null;
 
         this._settings.disconnectObject(this);
         Main.overview.disconnectObject(this);
-
-        if (this._cssFile) {
-            St.ThemeContext.get_for_stage(global.stage).get_theme()
-                .unload_stylesheet(this._cssFile);
-            try {
-                this._cssFile.delete(null);
-            } catch {
-                // already gone
-            }
-            this._cssFile = null;
-        }
 
         Main.layoutManager.removeChrome(this.actor);
         this.actor.destroy();
@@ -318,6 +317,8 @@ export class SearchBeamPopup {
 
         // Measure the search box again once it has been styled and shown
         // (a new font size only settles after the first frame).
+        if (this._relayoutId)
+            GLib.source_remove(this._relayoutId);
         this._relayoutId = GLib.idle_add(GLib.PRIORITY_DEFAULT_IDLE, () => {
             this._relayoutId = 0;
             if (this._visible)
@@ -499,6 +500,7 @@ export class SearchBeamPopup {
         controller.disconnectObject(this);
         entry.clutter_text.disconnectObject(this);
         entry.remove_style_class_name('search-beam-entry');
+        entry.set_style(null);
         this._resetAnswers();
         this._resetPreview();
 
@@ -690,6 +692,8 @@ export class SearchBeamPopup {
         if (!key)
             return;
 
+        if (this._lookupId)
+            GLib.source_remove(this._lookupId);
         this._lookupId = GLib.timeout_add(GLib.PRIORITY_DEFAULT, LOOKUP_DELAY_MS, () => {
             this._lookupId = 0;
             this._lookup(query, key).catch(e => {
@@ -869,17 +873,20 @@ export class SearchBeamPopup {
 
     // The 250 ms check only runs while a preview can actually be shown.
     _updatePreviewPoll() {
-        const wanted = this._visible && this._acquired && this._previewAllowed &&
-            this._controller.searchActive && !this._reader.visible;
-        if (wanted && !this._previewPollId) {
-            this._previewPollId = GLib.timeout_add(GLib.PRIORITY_DEFAULT, PREVIEW_POLL_MS, () => {
-                this._syncPreview();
-                return GLib.SOURCE_CONTINUE;
-            });
-        } else if (!wanted && this._previewPollId) {
+        if (this._previewPollId) {
             GLib.source_remove(this._previewPollId);
             this._previewPollId = 0;
         }
+
+        const wanted = this._visible && this._acquired && this._previewAllowed &&
+            this._controller.searchActive && !this._reader.visible;
+        if (!wanted)
+            return;
+
+        this._previewPollId = GLib.timeout_add(GLib.PRIORITY_DEFAULT, PREVIEW_POLL_MS, () => {
+            this._syncPreview();
+            return GLib.SOURCE_CONTINUE;
+        });
     }
 
     // What to preview: the result with keyboard focus, else the one under
@@ -1166,44 +1173,31 @@ export class SearchBeamPopup {
         else
             this._box.remove_style_class_name('light');
 
-        const box = [
+        const style = [
             `background-color: ${cssColor(bg)};`,
             `border-radius: ${radius}px;`,
         ];
         if (thickness > 0)
-            box.push(`border: ${thickness}px solid ${cssColor(border)};`);
-
-        const css = [`#searchBeamBox { ${box.join(' ')} }`];
-        css.push(`#searchBeamBox .search-section-content { border-radius: ${Math.max(radius - 4, 0)}px; }`);
-
+            style.push(`border: ${thickness}px solid ${cssColor(border)};`);
         if (fontSize > 0)
-            css.push(`#searchBeamBox * { font-size: ${fontSize}pt; }`);
-        if (entryFontSize > 0) {
-            css.push(`#searchBeamBox .search-beam-entry, #searchBeamBox .search-beam-entry * { font-size: ${entryFontSize}pt; }`);
-        }
+            style.push(`font-size: ${fontSize}pt;`);
         if (!autoText)
-            css.push(`#searchBeamBox, #searchBeamBox * { color: ${cssColor(text)} !important; }`);
+            style.push(`color: ${cssColor(text)};`);
+        this._box.set_style(style.join(' '));
 
-        this._loadStylesheet(css.join('\n'));
-    }
-
-    _loadStylesheet(css) {
-        if (css === this._appliedCss)
-            return;
-
-        const theme = St.ThemeContext.get_for_stage(global.stage).get_theme();
-        if (this._cssFile)
-            theme.unload_stylesheet(this._cssFile);
+        // stylesheet.css makes everything in the box inherit the font size
+        // and text colour set above.
+        if (fontSize > 0)
+            this._box.add_style_class_name('search-beam-custom-font');
         else
-            this._cssFile = Gio.File.new_for_path(this._stylesheetPath);
+            this._box.remove_style_class_name('search-beam-custom-font');
+        if (!autoText)
+            this._box.add_style_class_name('search-beam-custom-color');
+        else
+            this._box.remove_style_class_name('search-beam-custom-color');
 
-        try {
-            this._cssFile.replace_contents(new TextEncoder().encode(css), null,
-                false, Gio.FileCreateFlags.REPLACE_DESTINATION, null);
-            this._appliedCss = css;
-            theme.load_stylesheet(this._cssFile);
-        } catch (e) {
-            console.error(`Search Beam: could not apply styles: ${e.message}`);
-        }
+        // The search box is the Overview's: only styled while we hold it.
+        if (this._acquired)
+            this._entry.set_style(entryFontSize > 0 ? `font-size: ${entryFontSize}pt;` : null);
     }
 }

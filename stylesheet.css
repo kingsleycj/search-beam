@@ -1,7 +1,7 @@
 /* SPDX-License-Identifier: GPL-2.0-or-later
  *
  * Base look. Colours, corner radius, border and font sizes come from the
- * settings and are applied on top of this at runtime.
+ * settings and are set on the popup as inline styles at runtime.
  *
  * The result-row rules below are adapted from Search Light's stylesheet by
  * icedman (https://github.com/icedman/search-light, GPL-2.0-or-later).
@@ -19,6 +19,16 @@
 #searchBeamBox.light,
 #searchBeamBox.light * {
   color: black;
+}
+
+/* A font size or text colour chosen in the settings is set on the box;
+ * everything inside it follows. */
+#searchBeamBox.search-beam-custom-font * {
+  font-size: inherit;
+}
+
+#searchBeamBox.search-beam-custom-color * {
+  color: inherit !important;
 }
 
 /* The Overview's search box, while it lives in the popup. */
@@ -77,6 +87,7 @@
 #searchBeamBox .search-section-content {
   background-color: rgba(100, 100, 100, 0.2);
   border-color: transparent;
+  border-radius: 12px;
 }
 
 #searchBeamBox.light .search-section-content {

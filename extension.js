@@ -4,7 +4,6 @@
 // A GNOME 50 replacement for Search Light (github.com/icedman/search-light).
 
 import Clutter from 'gi://Clutter';
-import GLib from 'gi://GLib';
 import GObject from 'gi://GObject';
 import Meta from 'gi://Meta';
 import Shell from 'gi://Shell';
@@ -50,10 +49,7 @@ class SearchBeamPanelButton extends PanelMenu.Button {
 export default class SearchBeamExtension extends Extension {
     enable() {
         this._settings = this.getSettings();
-
-        const stylesheetPath = GLib.build_filenamev(
-            [GLib.get_user_runtime_dir(), `${this.uuid}.css`]);
-        this._popup = new SearchBeamPopup(this._settings, stylesheetPath);
+        this._popup = new SearchBeamPopup(this._settings);
 
         for (const key of SHORTCUT_KEYS) {
             Main.wm.addKeybinding(key, this._settings,

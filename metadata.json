@@ -6,6 +6,6 @@
     "50"
   ],
   "settings-schema": "org.gnome.shell.extensions.search-beam",
-  "version-name": "1.1",
+  "version-name": "1.2",
   "url": "https://github.com/kingsleycj/search-beam"
 }
